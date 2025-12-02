@@ -1,0 +1,16 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+!.venv/lib/python3.12/site-packages/deepagents_cli/config.py
+
+deploy.sh
+credentials.json
+.env
+.env.yaml
