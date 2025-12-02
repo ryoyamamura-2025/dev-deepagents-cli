@@ -10,10 +10,10 @@
 
 ## 2. TODO List
 
-1.  **Setup:** Create the basic NiceGUI web application structure.
-2.  **Frontend:** Implement the user interface with NiceGUI components for a simple chat interface.
-3.  **Backend:** Implement the logic to receive and handle user input from the UI.
-4.  **Integration:** Call the core `deepagents` logic from the backend and stream its output to the frontend.
-5.  **Dependencies:** Add `nicegui` and any other required web dependencies to `pyproject.toml`.
-6.  **Execution:** Add a script or clear instructions on how to run the new web application.
-7.  **Documentation:** Keep this project plan updated.
+1.  **[DONE] Setup:** Create the basic NiceGUI web application structure.
+2.  **[DONE] Frontend:** Implement the user interface with NiceGUI components for a simple chat interface.
+3.  **[DONE] Backend:** Implement the logic to receive and handle user input from the UI.
+4.  **[DONE] Integration:** Call the core `deepagents` logic from the backend and stream its output to the frontend.
+5.  **[DONE] Dependencies:** Add `nicegui` and any other required web dependencies to `pyproject.toml`.
+6.  **[DONE] Execution:** Add a script or clear instructions on how to run the new web application.
+7.  **[DONE] Documentation:** Keep this project plan updated.
