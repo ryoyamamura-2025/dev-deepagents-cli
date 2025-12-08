@@ -7,8 +7,14 @@ wheels/
 *.egg-info
 
 # Virtual environments
-.venv
-!.venv/lib/python3.12/site-packages/deepagents_cli/config.py
+.venv/
+
+# .venv/*
+# !.venv/lib/
+# !.venv/lib/python3.12/
+# !.venv/lib/python3.12/site-packages/
+# !.venv/lib/python3.12/site-packages/deepagents_cli/
+# !.venv/lib/python3.12/site-packages/deepagents_cli/*.py
 
 deploy.sh
 credentials.json

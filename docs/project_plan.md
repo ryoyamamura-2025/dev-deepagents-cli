@@ -1,19 +1,40 @@
-# DeepAgents WebApp Project Plan
+# DeepAgents WebApp プロジェクト計画
 
-## 1. Requirements
+## 1. 要件
 
-- Create a web-based user interface for the `deepagents` CLI tool.
-- The UI should provide a chat-like interface for interacting with the agent.
-- The application will be built using the **NiceGUI** framework.
-- The agent's output, including real-time streaming and logs, must be displayed within the UI.
-- All project requirements and the task list (TODOs) are to be documented in this file.
+- `deepagents` CLIツールのためのウェブベースのユーザーインターフェースを作成する。
+- UIはエージェントと対話するためのチャット風インターフェースを提供すること。
+- アプリケーションは**NiceGUI**フレームワークを使用して構築されること。
+- リアルタイムストリーミングやログを含むエージェントの出力は、UI内に表示されなければならない。
+- すべてのプロジェクト要件とタスクリスト（TODO）は、このファイルに記載されること。
 
-## 2. TODO List
+## 2. TODOリスト
 
-1.  **[DONE] Setup:** Create the basic NiceGUI web application structure.
-2.  **[DONE] Frontend:** Implement the user interface with NiceGUI components for a simple chat interface.
-3.  **[DONE] Backend:** Implement the logic to receive and handle user input from the UI.
-4.  **[DONE] Integration:** Call the core `deepagents` logic from the backend and stream its output to the frontend.
-5.  **[DONE] Dependencies:** Add `nicegui` and any other required web dependencies to `pyproject.toml`.
-6.  **[DONE] Execution:** Add a script or clear instructions on how to run the new web application.
-7.  **[DONE] Documentation:** Keep this project plan updated.
+1.  **UIレイアウトの変更**
+    *   [x] ファイル一覧表示を、中央のエリアから左側のドロワー（`ui.left_drawer`）に移動する。
+    *   [x] チャット表示エリアのレイアウトを、左ドロワーの存在に合わせて調整する。
+
+2.  **ファイルエクスプローラー機能の実装**
+    *   [x] エクスプローラーのルートとなる `project` ディレクトリを作成する。
+    *   [x] `project` ディレクトリ内を再帰的にスキャンし、ファイルとフォルダの階層構造を表現する `ui.tree` を構築する処理を実装する。
+    *   [x] アプリケーション起動時に、ファイルツリーを左ドロワーに表示する。
+
+3.  **ファイル操作モーダルの実装**
+    *   [x] ファイルをクリックした際に表示されるモーダル（`ui.dialog`）を作成する。
+    *   [x] モーダル内に、ファイル内容のプレビューと編集のため `ui.editor` を配置する。
+    *   [x] モーダル内に「保存」ボタンを配置する。
+    *   [x] **プレビュー機能**: ファイルパスを受け取り、その内容を読み込んでエディタに表示する関数を実装する。
+    *   [x] **編集機能**: `ui.editor` により、デフォルトで編集可能。
+    *   [x] **保存機能**: 「保存」ボタンを押すと、編集された内容を元のファイルに書き戻す関数を実装する。
+    *   [x] ファイルツリー内のファイル名がクリックされたら、そのファイルを引数としてモーダルを開く処理を実装する。
+
+4.  **既存機能**
+    *   [x] チャット機能（実装済み、ストリーミング対応）
+    *   [ ] `deepagents_cli` との連携（現在はモック実装）
+    *   [x] ドキュメントの更新
+
+5.  **追加実装項目**
+    *   [ ] 実際の `deepagents_cli` API との統合
+    *   [x] ファイルツリーのリフレッシュ機能
+    *   [x] エラーハンドリングの強化
+    *   [x] UI/UXの改善（必要に応じて）
