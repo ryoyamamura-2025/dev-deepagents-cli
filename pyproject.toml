@@ -1,0 +1,21 @@
+[project]
+name = "dev-deepagents-cli"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "deepagents==0.2.8",
+  "requests",
+  "rich>=13.0.0",
+  "prompt-toolkit>=3.0.52",
+  "tavily-python",
+  "python-dotenv",
+  "markdownify>=0.13.0",
+  "langchain>=1.0.7",
+  "langchain-google-genai>=3.2.0",
+]
+
+[project.scripts]
+deepagents = "deepagents_cli:cli_main"
+deepagents-cli = "deepagents_cli:cli_main"
