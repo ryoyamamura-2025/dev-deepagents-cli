@@ -8,6 +8,7 @@ wheels/
 
 # Virtual environments
 .venv/
+venv/
 
 # .venv/*
 # !.venv/lib/
@@ -20,3 +21,5 @@ deploy.sh
 credentials.json
 .env
 .env.yaml
+change_owner.sh
+.langgraph*

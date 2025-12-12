@@ -15,3 +15,7 @@ dependencies = [
   "langchain>=1.0.7",
   "langchain-google-genai>=3.2.0",
 ]
+
+[project.scripts]
+deepagents = "app.deepagents_cli:cli_main"
+deepagents-cli = "app.deepagents_cli:cli_main"
