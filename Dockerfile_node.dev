@@ -1,0 +1,44 @@
+
+# 1) ベースイメージ：軽量な Python
+FROM python:3.13-slim
+
+# 403 forbiddenでエラーの場合、http_proxy, htts_proxyを有効化
+ENV http_proxy="http://ryo.yamamura:5ij8qc5r@proxy.km.local:8080"
+ENV https_proxy="http://ryo.yamamura:5ij8qc5r@proxy.km.local:8080"
+
+# 2) uv（高速パッケージマネージャ）を取り込み
+COPY --from=ghcr.io/astral-sh/uv:0.8.14 /uv /uvx /bin/
+
+# 2-1) ffmpeg と npm (Node.js) をインストール
+#      --no-install-recommends で推奨パッケージを除外し、後処理でキャッシュを削除して軽量化
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    nodejs \
+    npm \
+    && rm -rf /var/lib/apt/lists/*
+
+# 3) 作業ディレクトリ
+WORKDIR /app
+
+# 4-1) npm の依存関係をインストール (中間レイヤ)
+# RUN npm install -g docx && npm cache clean --force
+
+# 4-2) Python の依存関係をインストール (中間レイヤ)
+#       BuildKitのRUN --mount を使って、pyproject/lock を"一時的に"供給
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    uv sync --locked --no-install-project
+
+# 5) ここで初めてソースをコピー
+COPY pyproject.toml uv.lock ./
+COPY ./app ./
+
+# 6) プロジェクト本体を editable で同期
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked
+
+# 7) Cloud Run は 8080 がデフォルトなので開けておく
+EXPOSE 8080
+
+# 8) コンテナ起動時のコマンド
+CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
