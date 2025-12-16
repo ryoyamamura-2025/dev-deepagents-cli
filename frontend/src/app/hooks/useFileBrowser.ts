@@ -3,7 +3,7 @@
 import useSWR from 'swr';
 import { useState, useEffect, useCallback } from 'react';
 
-const FILE_API_URL = process.env.NEXT_PUBLIC_FILE_API_URL || 'http://localhost:8124';
+const FILE_API_URL = process.env.NEXT_PUBLIC_FILE_API_URL || '';
 
 export interface FileSystemItem {
   name: string;
@@ -35,7 +35,7 @@ export function useFileBrowser(initialPath: string = "") {
   // ファイル一覧取得（SWRでキャッシング）
   const { data, error, isLoading, mutate } = useSWR<FileBrowserResponse>(
     ['file-browser', currentPath],
-    async ([_, path]) => {
+    async ([_, path]: readonly [string, string]) => {
       const params = new URLSearchParams({ path });
       const response = await fetch(`${FILE_API_URL}/api/files?${params}`);
       if (!response.ok) throw new Error('Failed to fetch files');

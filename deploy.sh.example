@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ========= 埋めるところ =========
+PROJECT_ID="xxxx"
+REGION="xxxx"
+SERVICE_NAME="xxxx"
+MEMORY="4Gi"
+# ================================
+
+echo "🔨 Building and pushing to GCR..."
+gcloud builds submit \
+  --tag gcr.io/${PROJECT_ID}/${SERVICE_NAME} \
+  --dockerfile Dockerfile
+
+echo "🚀 Deploying to Cloud Run..."
+gcloud run deploy ${SERVICE_NAME} \
+  --image gcr.io/${PROJECT_ID}/${SERVICE_NAME} \
+  --platform managed \
+  --no-allow-unauthenticated \
+  --region ${REGION} \
+  --port 8080 \
+  --memory ${MEMORY} \
+  --cpu 1 \
+  --timeout 300 \
+  --env-vars-file="./.env.yaml"
+
+echo "✅ Deployment complete!"
+gcloud run services describe ${SERVICE_NAME} --region ${REGION} --format 'value(status.url)'

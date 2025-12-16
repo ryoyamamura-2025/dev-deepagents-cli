@@ -31,7 +31,7 @@ app.add_middleware(
 # LangGraph へのプロキシ
 # ========================================
 # LangGraph Server URL
-LANGGRAPH_URL = "http://localhost:2024"
+LANGGRAPH_API_URL = os.getenv("LANGGRAPH_API_URL", "http://localhost:2024")
 
 @app.api_route("/agent/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def proxy_to_langgraph(path: str, request: Request):
@@ -60,7 +60,7 @@ async def proxy_to_langgraph(path: str, request: Request):
                 method = request.method
                 body = await request.body()
             
-            url = f"{LANGGRAPH_URL}/{path}"
+            url = f"{LANGGRAPH_API_URL}/{path}"
             
             # クエリパラメータも転送（GETリクエストの場合のみ）
             if request.url.query and method != "POST":
@@ -78,10 +78,20 @@ async def proxy_to_langgraph(path: str, request: Request):
                     },
                     timeout=300.0,  # 5分タイムアウト
                 )
+
+                # ストリーミングレスポンスの場合
+                if response.headers.get("content-type", "").startswith("text/event-stream"):
+                    return StreamingResponse(
+                        response.aiter_bytes(),
+                        status_code=response.status_code,
+                        headers=dict(response.headers),
+                        media_type="text/event-stream",
+                    )
+
             except httpx.ConnectError:
                 raise HTTPException(
                     status_code=503,
-                    detail=f"LangGraph server is not available at {LANGGRAPH_URL}. Please ensure langgraph dev is running."
+                    detail=f"LangGraph server is not available at {LANGGRAPH_API_URL}. Please ensure langgraph dev is running."
                 )
             except httpx.TimeoutException:
                 raise HTTPException(
@@ -502,56 +512,13 @@ async def websocket_endpoint(websocket: WebSocket):
             file_watcher.remove_listener(on_change)
 
 # フロントエンド配信（本番環境用）
-frontend_out_dir = Path(__file__).parent / "frontend" / "out"
-if frontend_out_dir.exists():
-    # Next.jsの静的アセットを配信
-    _next_static_dir = frontend_out_dir / "_next" / "static"
-    if _next_static_dir.exists():
-        app.mount("/_next/static", StaticFiles(directory=str(_next_static_dir)), name="next-static")
-    
-    # カスタムアセットがある場合
-    assets_dir = frontend_out_dir / "assets"
-    if assets_dir.exists():
-        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
-
-    @app.get("/")
-    async def serve_index():
-        index_html = frontend_out_dir / "index.html"
-        if index_html.exists():
-            return FileResponse(str(index_html))
-        raise HTTPException(status_code=404, detail="Frontend index.html not found")
-
-    # その他の静的ファイルとSPAフォールバック
-    @app.get("/{full_path:path}")
-    async def serve_frontend_files(full_path: str):
-        # APIエンドポイント、WebSocket、ヘルスチェックは除外
-        if full_path.startswith(("api/", "agent/", "ws", "health")):
-            raise HTTPException(status_code=404, detail="Not found")
-
-        file_path = frontend_out_dir / full_path.lstrip("/")
-
-        # セキュリティ: パストラバーサル防止
-        try:
-            # resolve()で絶対パスに変換
-            resolved_path = file_path.resolve()
-            # frontend_out_dirの外へのアクセスでないことを確認
-            if not str(resolved_path).startswith(str(frontend_out_dir.resolve())):
-                raise HTTPException(status_code=403, detail="Forbidden")
-        except (ValueError, OSError):
-            raise HTTPException(status_code=403, detail="Forbidden")
-
-        # ファイルが存在すればそれを返す
-        if resolved_path.exists() and resolved_path.is_file():
-            return FileResponse(str(resolved_path))
-        
-        # SPAフォールバック: 存在しないパスの場合はindex.htmlを返す
-        index_html = frontend_out_dir / "index.html"
-        if index_html.exists():
-            return FileResponse(str(index_html))
-        
-        raise HTTPException(status_code=404, detail="Not found")
-
+STATIC_DIR = os.getenv("STATIC_DIR", "../static-build")
+if os.path.exists(STATIC_DIR):
+    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+else:
+    print(f"Warning: Static directory {STATIC_DIR} not found")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8124)
+    PORT = int(os.environ.get("PORT", 8124))
+    uvicorn.run(app, host="0.0.0.0", port=PORT)

@@ -16,6 +16,7 @@ export interface SubAgent {
 }
 
 export interface FileItem {
+  name?: string;
   path: string;
   content: string;
 }
