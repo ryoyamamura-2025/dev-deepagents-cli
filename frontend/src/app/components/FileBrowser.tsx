@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { ChevronRight, Home, RefreshCw, Wifi, WifiOff, X } from "lucide-react";
+import { useState, useRef } from "react";
+import { ChevronRight, Home, RefreshCw, Wifi, WifiOff, X, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -51,14 +51,19 @@ export function FileBrowser({ onClose }: FileBrowserProps) {
     wsConnected,
     navigateTo,
     readFile,
+    updateFile,
+    deleteFile,
+    uploadFiles,
     refreshDirectory,
   } = useFileBrowser();
 
   const [selectedFile, setSelectedFile] = useState<{
     path: string;
     content: string;
+    name: string;
   } | null>(null);
   const [loadingFile, setLoadingFile] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // パンくずナビゲーション用のパス分割
   const pathSegments = currentPath && currentPath !== "."
@@ -72,11 +77,24 @@ export function FileBrowser({ onClose }: FileBrowserProps) {
   const handleFileClick = async (item: FileSystemItem) => {
     setLoadingFile(true);
     try {
-      const fileData = await readFile(item.path);
-      setSelectedFile({
-        path: item.path,
-        content: fileData.content,
-      });
+      // 画像やPDFなどのバイナリファイルは内容を読み込まずにプレビュー
+      const extension = item.extension?.toLowerCase() || "";
+      const isBinaryFile = ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico", "pdf"].includes(extension);
+
+      if (isBinaryFile) {
+        setSelectedFile({
+          path: item.path,
+          content: "", // バイナリファイルは内容を空にする
+          name: item.name,
+        });
+      } else {
+        const fileData = await readFile(item.path);
+        setSelectedFile({
+          path: item.path,
+          content: fileData.content,
+          name: item.name,
+        });
+      }
     } catch (error) {
       console.error("Failed to read file:", error);
       // TODO: Show error toast
@@ -93,6 +111,51 @@ export function FileBrowser({ onClose }: FileBrowserProps) {
       // 指定されたパスセグメントまで戻る
       const newPath = pathSegments.slice(0, index + 1).join("/");
       navigateTo(newPath);
+    }
+  };
+
+  const handleSaveFile = async (fileName: string, content: string) => {
+    try {
+      await updateFile(fileName, content);
+      // Update the selected file with new content
+      if (selectedFile) {
+        setSelectedFile({
+          ...selectedFile,
+          content,
+        });
+      }
+    } catch (error) {
+      console.error("Failed to save file:", error);
+      throw error;
+    }
+  };
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileInputChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    try {
+      await uploadFiles(Array.from(files), currentPath);
+      // Clear the input so the same file can be uploaded again
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    } catch (error) {
+      console.error("Failed to upload files:", error);
+      // TODO: Show error toast
+    }
+  };
+
+  const handleDeleteClick = async (item: FileSystemItem) => {
+    try {
+      await deleteFile(item.path);
+    } catch (error) {
+      console.error("Failed to delete file:", error);
+      // TODO: Show error toast
     }
   };
 
@@ -117,6 +180,17 @@ export function FileBrowser({ onClose }: FileBrowserProps) {
                 </>
               )}
             </div>
+
+            {/* Upload button */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleUploadClick}
+              className="h-8 w-8"
+              title="ファイルをアップロード"
+            >
+              <Upload className="h-4 w-4" />
+            </Button>
 
             {/* Refresh button */}
             <Button
@@ -186,24 +260,32 @@ export function FileBrowser({ onClose }: FileBrowserProps) {
               items={items}
               onFileClick={handleFileClick}
               onDirectoryClick={handleDirectoryClick}
+              onDeleteClick={handleDeleteClick}
             />
           )}
         </ScrollArea>
       </div>
 
+      {/* Hidden file input for upload */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={handleFileInputChange}
+      />
+
       {/* File preview dialog */}
       {selectedFile && (
         <FileViewDialog
           file={{
+            name: selectedFile.name,
             path: selectedFile.path,
             content: selectedFile.content,
           }}
-          onSaveFile={async () => {
-            // TODO: Implement file saving if needed
-            console.log("Save file not implemented in read-only mode");
-          }}
+          onSaveFile={handleSaveFile}
           onClose={() => setSelectedFile(null)}
-          editDisabled={true} // Read-only mode
+          editDisabled={false}
         />
       )}
     </>

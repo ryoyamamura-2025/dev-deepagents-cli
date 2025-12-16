@@ -1,6 +1,7 @@
 "use client";
 
-import { File, Folder, ChevronRight } from "lucide-react";
+import { File, Folder, ChevronRight, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { FileSystemItem } from "@/app/hooks/useFileBrowser";
 
@@ -8,6 +9,7 @@ interface FileSystemListProps {
   items: FileSystemItem[];
   onFileClick: (item: FileSystemItem) => void;
   onDirectoryClick: (item: FileSystemItem) => void;
+  onDeleteClick?: (item: FileSystemItem) => void;
 }
 
 function formatFileSize(bytes: number): string {
@@ -35,7 +37,7 @@ function formatDate(timestamp: number): string {
   }
 }
 
-export function FileSystemList({ items, onFileClick, onDirectoryClick }: FileSystemListProps) {
+export function FileSystemList({ items, onFileClick, onDirectoryClick, onDeleteClick }: FileSystemListProps) {
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center p-8 text-center">
@@ -48,39 +50,60 @@ export function FileSystemList({ items, onFileClick, onDirectoryClick }: FileSys
   return (
     <div className="divide-y divide-border">
       {items.map((item) => (
-        <button
+        <div
           key={item.path}
-          type="button"
-          onClick={() => item.type === "directory" ? onDirectoryClick(item) : onFileClick(item)}
           className={cn(
-            "flex w-full items-center gap-3 px-4 py-3 text-left transition-colors",
-            "hover:bg-accent focus:bg-accent focus:outline-none"
+            "group flex w-full items-center gap-3 px-4 py-3 transition-colors",
+            "hover:bg-accent"
           )}
         >
-          {item.type === "directory" ? (
-            <Folder className="h-5 w-5 flex-shrink-0 text-blue-500" />
-          ) : (
-            <File className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
-          )}
+          <button
+            type="button"
+            onClick={() => item.type === "directory" ? onDirectoryClick(item) : onFileClick(item)}
+            className="flex flex-1 items-center gap-3 text-left focus:outline-none"
+          >
+            {item.type === "directory" ? (
+              <Folder className="h-5 w-5 flex-shrink-0 text-blue-500" />
+            ) : (
+              <File className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
+            )}
 
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="truncate text-sm font-medium">{item.name}</span>
-              {item.type === "directory" && (
-                <ChevronRight className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-              )}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="truncate text-sm font-medium">{item.name}</span>
+                {item.type === "directory" && (
+                  <ChevronRight className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                )}
+              </div>
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                {item.type === "file" && (
+                  <>
+                    <span>{formatFileSize(item.size)}</span>
+                    <span>•</span>
+                  </>
+                )}
+                <span>{formatDate(item.modified)}</span>
+              </div>
             </div>
-            <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              {item.type === "file" && (
-                <>
-                  <span>{formatFileSize(item.size)}</span>
-                  <span>•</span>
-                </>
-              )}
-              <span>{formatDate(item.modified)}</span>
-            </div>
-          </div>
-        </button>
+          </button>
+
+          {onDeleteClick && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (confirm(`「${item.name}」を削除してもよろしいですか？`)) {
+                  onDeleteClick(item);
+                }
+              }}
+              title="削除"
+            >
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
+          )}
+        </div>
       ))}
     </div>
   );

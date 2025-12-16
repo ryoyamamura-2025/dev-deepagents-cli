@@ -87,9 +87,27 @@ export const FileViewDialog = React.memo<{
     return fileExtension === "md" || fileExtension === "markdown";
   }, [fileExtension]);
 
+  const isPlainText = useMemo(() => {
+    return ["txt", "log", "env", "gitignore", ""].includes(fileExtension);
+  }, [fileExtension]);
+
+  const isImage = useMemo(() => {
+    return ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"].includes(fileExtension);
+  }, [fileExtension]);
+
+  const isPdf = useMemo(() => {
+    return fileExtension === "pdf";
+  }, [fileExtension]);
+
   const language = useMemo(() => {
     return LANGUAGE_MAP[fileExtension] || "text";
   }, [fileExtension]);
+
+  const fileUrl = useMemo(() => {
+    if (!file?.path) return "";
+    const FILE_API_URL = process.env.NEXT_PUBLIC_FILE_API_URL || 'http://localhost:8124';
+    return `${FILE_API_URL}/api/files/${file.path}?raw=true`;
+  }, [file?.path]);
 
   const handleCopy = useCallback(() => {
     if (fileContent) {
@@ -162,31 +180,35 @@ export const FileViewDialog = React.memo<{
           <div className="flex shrink-0 items-center gap-1">
             {!isEditingMode && (
               <>
-                <Button
-                  onClick={handleEdit}
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 px-2"
-                  disabled={editDisabled}
-                >
-                  <Edit
-                    size={16}
-                    className="mr-1"
-                  />
-                  Edit
-                </Button>
-                <Button
-                  onClick={handleCopy}
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 px-2"
-                >
-                  <Copy
-                    size={16}
-                    className="mr-1"
-                  />
-                  Copy
-                </Button>
+                {!isImage && !isPdf && (
+                  <>
+                    <Button
+                      onClick={handleEdit}
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2"
+                      disabled={editDisabled}
+                    >
+                      <Edit
+                        size={16}
+                        className="mr-1"
+                      />
+                      Edit
+                    </Button>
+                    <Button
+                      onClick={handleCopy}
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2"
+                    >
+                      <Copy
+                        size={16}
+                        className="mr-1"
+                      />
+                      Copy
+                    </Button>
+                  </>
+                )}
                 <Button
                   onClick={handleDownload}
                   variant="ghost"
@@ -214,10 +236,36 @@ export const FileViewDialog = React.memo<{
           ) : (
             <ScrollArea className="bg-surface h-full rounded-md">
               <div className="p-4">
-                {fileContent ? (
+                {isImage ? (
+                  <div className="flex items-center justify-center rounded-md bg-background p-6">
+                    <img
+                      src={fileUrl}
+                      alt={fileName}
+                      className="max-h-[600px] max-w-full object-contain"
+                      onError={(e) => {
+                        e.currentTarget.src = "";
+                        e.currentTarget.alt = "画像の読み込みに失敗しました";
+                      }}
+                    />
+                  </div>
+                ) : isPdf ? (
+                  <div className="rounded-md bg-background">
+                    <iframe
+                      src={fileUrl}
+                      className="h-[600px] w-full rounded-md"
+                      title={fileName}
+                    />
+                  </div>
+                ) : fileContent ? (
                   isMarkdown ? (
                     <div className="rounded-md p-6">
                       <MarkdownContent content={fileContent} />
+                    </div>
+                  ) : isPlainText ? (
+                    <div className="rounded-md bg-background p-6">
+                      <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed text-foreground">
+                        {fileContent}
+                      </pre>
                     </div>
                   ) : (
                     <SyntaxHighlighter

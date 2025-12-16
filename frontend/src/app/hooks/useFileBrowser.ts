@@ -35,7 +35,7 @@ export function useFileBrowser(initialPath: string = "") {
   // ファイル一覧取得（SWRでキャッシング）
   const { data, error, isLoading, mutate } = useSWR<FileBrowserResponse>(
     ['file-browser', currentPath],
-    async ([_, path]: [string, string]) => {
+    async ([_, path]) => {
       const params = new URLSearchParams({ path });
       const response = await fetch(`${FILE_API_URL}/api/files?${params}`);
       if (!response.ok) throw new Error('Failed to fetch files');
@@ -128,6 +128,44 @@ export function useFileBrowser(initialPath: string = "") {
     return response.json();
   }, []);
 
+  // ファイル更新
+  const updateFile = useCallback(async (filePath: string, content: string): Promise<void> => {
+    const response = await fetch(`${FILE_API_URL}/api/files/${filePath}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ content }),
+    });
+    if (!response.ok) throw new Error('Failed to update file');
+    await mutate(); // ファイル一覧を再取得
+  }, [mutate]);
+
+  // ファイル削除
+  const deleteFile = useCallback(async (filePath: string): Promise<void> => {
+    const response = await fetch(`${FILE_API_URL}/api/files/${filePath}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) throw new Error('Failed to delete file');
+    await mutate(); // ファイル一覧を再取得
+  }, [mutate]);
+
+  // ファイルアップロード
+  const uploadFiles = useCallback(async (files: File[], targetPath: string = ""): Promise<void> => {
+    const formData = new FormData();
+    files.forEach(file => {
+      formData.append('files', file);
+    });
+    formData.append('path', targetPath);
+
+    const response = await fetch(`${FILE_API_URL}/api/files/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) throw new Error('Failed to upload files');
+    await mutate(); // ファイル一覧を再取得
+  }, [mutate]);
+
   // ディレクトリナビゲーション
   const navigateTo = useCallback((path: string) => {
     setCurrentPath(path);
@@ -141,6 +179,9 @@ export function useFileBrowser(initialPath: string = "") {
     wsConnected,
     navigateTo,
     readFile,
+    updateFile,
+    deleteFile,
+    uploadFiles,
     refreshDirectory: () => mutate(),
   };
 }

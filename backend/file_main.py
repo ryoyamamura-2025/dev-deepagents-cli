@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
+from pydantic import BaseModel
 import asyncio
 import json
 from file_api.file_watcher import FileWatcher
@@ -9,9 +10,10 @@ import httpx
 
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from fastapi import FastAPI, Request, WebSocket, HTTPException, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, HTTPException, WebSocketDisconnect, Request, UploadFile, Form
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, StreamingResponse
 
 app = FastAPI()
 
@@ -227,14 +229,16 @@ async def list_files(path: str = ""):
 
 
 @app.get("/api/files/{file_path:path}")
-async def read_file(file_path: str):
+async def read_file(file_path: str, raw: bool = False):
     """
     ファイル内容を取得
 
     Args:
         file_path: 相対ファイルパス
+        raw: Trueの場合、バイナリファイルとして配信（画像・PDF用）
 
     Returns:
+        raw=False (デフォルト):
         {
             "success": bool,
             "content": str,
@@ -242,6 +246,9 @@ async def read_file(file_path: str):
             "size": int,
             "modified": float (timestamp)
         }
+        
+        raw=True:
+        バイナリファイルを直接配信（Content-Type自動設定）
     """
     try:
         target_file = sanitize_path(file_path, WATCH_DIR)
@@ -261,11 +268,25 @@ async def read_file(file_path: str):
             )
 
         # ファイル内容読み取り
+        # rawモードの場合はバイナリファイルとして配信
+        if raw:
+            import mimetypes
+            mime_type, _ = mimetypes.guess_type(str(target_file))
+            return FileResponse(
+                path=target_file,
+                media_type=mime_type or "application/octet-stream",
+                filename=target_file.name
+            )
+
+        # テキストファイルとして読み取り
         try:
             content = target_file.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            raise HTTPException(status_code=400, detail="Binary file not supported")
-
+        except UnicodeDecodeError:    
+            raise HTTPException(
+                status_code=400,
+                detail="Binary file not supported. Use ?raw=true for binary files"
+            )
+        
         stat = target_file.stat()
 
         return {
@@ -282,6 +303,153 @@ async def read_file(file_path: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
 
+class FileUpdateRequest(BaseModel):
+    """ファイル更新リクエストモデル"""
+    content: str
+
+
+@app.put("/api/files/{file_path:path}")
+async def update_file(file_path: str, request: FileUpdateRequest):
+    """
+    ファイル内容を更新
+
+    Args:
+        file_path: 相対ファイルパス
+        request: 更新内容を含むリクエストボディ
+
+    Returns:
+        {
+            "success": bool,
+            "message": str,
+            "path": str
+        }
+    """
+    try:
+        target_file = sanitize_path(file_path, WATCH_DIR)
+
+        # 親ディレクトリが存在するか確認
+        if not target_file.parent.exists():
+            raise HTTPException(status_code=404, detail="Parent directory not found")
+
+        # ファイルが存在しない場合は新規作成
+        if not target_file.exists():
+            target_file.touch()
+
+        # ファイル書き込み
+        try:
+            target_file.write_text(request.content, encoding="utf-8")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to write file: {str(e)}")
+
+        return {
+            "success": True,
+            "message": "File updated successfully",
+            "path": str(target_file.relative_to(WATCH_DIR))
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
+
+@app.delete("/api/files/{file_path:path}")
+async def delete_file(file_path: str):
+    """
+    ファイルまたはディレクトリを削除
+
+    Args:
+        file_path: 相対ファイルパス
+
+    Returns:
+        {
+            "success": bool,
+            "message": str,
+            "path": str
+        }
+    """
+    try:
+        target_path = sanitize_path(file_path, WATCH_DIR)
+
+        if not target_path.exists():
+            raise HTTPException(status_code=404, detail="File or directory not found")
+
+        # ディレクトリの場合は再帰的に削除
+        if target_path.is_dir():
+            import shutil
+            shutil.rmtree(target_path)
+        else:
+            target_path.unlink()
+
+        return {
+            "success": True,
+            "message": "File deleted successfully",
+            "path": str(target_path.relative_to(WATCH_DIR))
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
+
+@app.post("/api/files/upload")
+async def upload_files(
+    files: List[UploadFile],
+    path: str = Form("")
+):
+    """
+    ファイルをアップロード
+
+    Args:
+        files: アップロードするファイルのリスト
+        path: アップロード先の相対パス（オプション）
+
+    Returns:
+        {
+            "success": bool,
+            "message": str,
+            "uploaded_files": List[str]
+        }
+    """
+    try:
+        target_dir = sanitize_path(path, WATCH_DIR)
+
+        if not target_dir.exists():
+            raise HTTPException(status_code=404, detail="Target directory not found")
+
+        if not target_dir.is_dir():
+            raise HTTPException(status_code=400, detail="Target path is not a directory")
+
+        uploaded_files = []
+
+        for file in files:
+            if not file.filename:
+                continue
+
+            # ファイル名をサニタイズ（パストラバーサル防止）
+            safe_filename = Path(file.filename).name
+            target_file = target_dir / safe_filename
+
+            # ファイルを保存
+            content = await file.read()
+            target_file.write_bytes(content)
+
+            uploaded_files.append(str(target_file.relative_to(WATCH_DIR)))
+
+        return {
+            "success": True,
+            "message": f"Uploaded {len(uploaded_files)} file(s)",
+            "uploaded_files": uploaded_files
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
