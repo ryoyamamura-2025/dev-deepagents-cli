@@ -4,8 +4,10 @@ from typing import List, Dict, Optional
 from pydantic import BaseModel
 import asyncio
 import json
+import logging
 from file_api.file_watcher import FileWatcher
 from file_api.config import WATCH_DIR, CORS_ORIGINS, MAX_FILE_SIZE
+from file_api.cloud_storage import ensure_agent_config
 import httpx
 
 from fastapi.staticfiles import StaticFiles
@@ -14,6 +16,13 @@ from fastapi import FastAPI, WebSocket, HTTPException, WebSocketDisconnect, Requ
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -132,11 +141,29 @@ file_watcher = None
 async def startup():
     """サーバー起動時にファイル監視を開始"""
     global file_watcher
+
+    # Download agent_config from Cloud Storage or use local fallback
+    logger.info("Ensuring agent_config is available...")
+    bucket_name = os.getenv("GCS_AGENT_CONFIG_BUCKET")
+    source_prefix = os.getenv("GCS_AGENT_CONFIG_PREFIX", "agent_config")
+    destination_dir = os.getenv("AGENT_CONFIG_DEST_DIR", "/root")
+    fallback_dir = os.getenv("AGENT_CONFIG_FALLBACK_DIR", "./agent_config")
+
+    if not ensure_agent_config(
+        bucket_name=bucket_name,
+        source_prefix=source_prefix,
+        destination_dir=destination_dir,
+        fallback_dir=fallback_dir if os.path.exists(fallback_dir) else None
+    ):
+        logger.warning("Could not ensure agent_config availability. Agent may not function properly.")
+    else:
+        logger.info("agent_config is ready")
+
     # イベントループを取得してFileWatcherに渡す
     loop = asyncio.get_event_loop()
     file_watcher = FileWatcher(WATCH_DIR, event_loop=loop)
     file_watcher.start()
-    print(f"Server started. Watching directory: {WATCH_DIR}")
+    logger.info(f"Server started. Watching directory: {WATCH_DIR}")
 
 
 @app.on_event("shutdown")
