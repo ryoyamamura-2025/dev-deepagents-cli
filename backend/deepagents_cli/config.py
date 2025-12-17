@@ -175,7 +175,8 @@ class Settings:
     @property
     def has_anthropic(self) -> bool:
         """Check if Anthropic API key is configured."""
-        return self.anthropic_api_key is not None
+        return True
+        # return self.anthropic_api_key is not None
 
     @property
     def has_google(self) -> bool:
@@ -381,16 +382,19 @@ def create_model() -> BaseChatModel:
             model=model_name,
         )
     if settings.has_anthropic:
-        from langchain_anthropic import ChatAnthropic
+        from langchain_google_vertexai.model_garden import ChatAnthropicVertex
+        # from langchain_anthropic import ChatAnthropic
 
-        model_name = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
+        model_name = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5")
         console.print(f"[dim]Using Anthropic model: {model_name}[/dim]")
-        return ChatAnthropic(
+        return ChatAnthropicVertex(
             model_name=model_name,
+            location="global",
             # The attribute exists, but it has a Pydantic alias which
             # causes issues in IDEs/type checkers.
-            max_tokens=20_000,  # type: ignore[arg-type]
+            # max_tokens=20_000,  # type: ignore[arg-type]
         )
+
     if settings.has_google:
         from langchain_google_genai import ChatGoogleGenerativeAI
 

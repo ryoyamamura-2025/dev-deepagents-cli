@@ -23,6 +23,7 @@ services:
       dockerfile: Dockerfile.dev
     volumes:
       - ./backend:/app
+      - ./backend/.deepagents:/root/.deepagents
     ports:
       - "8124:8124"
     env_file:

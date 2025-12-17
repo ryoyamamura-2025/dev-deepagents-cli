@@ -1,29 +1,142 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ========= 埋めるところ =========
-PROJECT_ID="xxxx"
-REGION="xxxx"
-SERVICE_NAME="xxxx"
-MEMORY="4Gi"
-# ================================
+usage() {
+  cat <<'EOF'
+Cloud Run へのビルド & デプロイを実行するスクリプト。
+環境変数での指定を基本とし、オプションで上書き可能です。
 
-echo "🔨 Building and pushing to GCR..."
-gcloud builds submit \
-  --tag gcr.io/${PROJECT_ID}/${SERVICE_NAME} \
-  --dockerfile Dockerfile
+主要環境変数 / オプション:
+  PROJECT_ID / --project|-p        必須。GCP プロジェクト ID
+  REGION / --region|-r             デフォルト: us-central1
+  REPO / --repo                    Artifact Registry のリポジトリ名 (docker)
+  SERVICE_NAME / --service|-s      Cloud Run サービス名
+  IMAGE_NAME / --image             コンテナイメージ名
+  TAG / --tag                      イメージタグ。デフォルト: dev
+  MEMORY / --memory                Cloud Run メモリ。デフォルト: 4Gi
+  CPU / --cpu                      Cloud Run CPU。デフォルト: 1
+  TIMEOUT / --timeout              タイムアウト秒。デフォルト: 300
+  PORT / --port                    デフォルト: 8080
+  ENV_FILE / --env-file            --env-vars-file に渡すファイル (存在する場合のみ適用)
+  ALLOW_UNAUTH / --allow-unauth    true で --allow-unauthenticated を付与
+  BUILD_CONTEXT / --context        docker build のコンテキスト。デフォルト: .
+  DESCRIPTION / --description      Artifact Registry リポジトリ説明
+  --help                           このヘルプを表示
+EOF
+}
 
-echo "🚀 Deploying to Cloud Run..."
-gcloud run deploy ${SERVICE_NAME} \
-  --image gcr.io/${PROJECT_ID}/${SERVICE_NAME} \
-  --platform managed \
-  --no-allow-unauthenticated \
-  --region ${REGION} \
-  --port 8080 \
-  --memory ${MEMORY} \
-  --cpu 1 \
-  --timeout 300 \
-  --env-vars-file="./.env.yaml"
+PROJECT_ID="${PROJECT_ID:-xxxxxxxxxxxxxxxxxxxx}"
+REGION="${REGION:-us-central1}"
+REPO="${REPO:-xxxxxxxxxxxxxxxxxxxx}"
+SERVICE_NAME="${SERVICE_NAME:-xxxxxxxxxxxxxxxxxxxx}"
+IMAGE_NAME="${IMAGE_NAME:-xxxxxxxxxxxxxxxxxxxx}"
+TAG="${TAG:-dev}"
+MEMORY="${MEMORY:-4Gi}"
+CPU="${CPU:-1}"
+TIMEOUT="${TIMEOUT:-300}"
+PORT="${PORT:-8080}"
+ENV_FILE="${ENV_FILE:-.env.yaml}"
+ALLOW_UNAUTH="${ALLOW_UNAUTH:-false}"
+BUILD_CONTEXT="${BUILD_CONTEXT:-.}"
+DESCRIPTION="${DESCRIPTION:-Docker images for Cloud Run}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --project|-p) PROJECT_ID="$2"; shift 2 ;;
+    --region|-r) REGION="$2"; shift 2 ;;
+    --repo) REPO="$2"; shift 2 ;;
+    --service|-s) SERVICE_NAME="$2"; shift 2 ;;
+    --image) IMAGE_NAME="$2"; shift 2 ;;
+    --tag) TAG="$2"; shift 2 ;;
+    --memory) MEMORY="$2"; shift 2 ;;
+    --cpu) CPU="$2"; shift 2 ;;
+    --timeout) TIMEOUT="$2"; shift 2 ;;
+    --port) PORT="$2"; shift 2 ;;
+    --env-file) ENV_FILE="$2"; shift 2 ;;
+    --allow-unauth|--allow-unauthenticated) ALLOW_UNAUTH="true"; shift ;;
+    --context) BUILD_CONTEXT="$2"; shift 2 ;;
+    --description) DESCRIPTION="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
+  esac
+done
+
+require() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "❌ $1 が見つかりません。インストールしてください。" >&2
+    exit 1
+  fi
+}
+
+require gcloud
+require docker
+
+if [[ -z "$PROJECT_ID" ]]; then
+  PROJECT_ID="$(gcloud config get-value core/project 2>/dev/null || true)"
+fi
+
+if [[ -z "$PROJECT_ID" ]]; then
+  echo "❌ PROJECT_ID が未設定です。環境変数または --project で指定してください。" >&2
+  usage
+  exit 1
+fi
+
+ACTIVE_ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format="value(account)" 2>/dev/null || true)"
+if [[ -z "$ACTIVE_ACCOUNT" ]]; then
+  echo "❌ gcloud の認証情報が見つかりません。'gcloud auth login' を実行してください。" >&2
+  exit 1
+fi
+
+echo "🔧 Setting gcloud project to ${PROJECT_ID}..."
+gcloud config set project "$PROJECT_ID" >/dev/null
+
+REPO_HOST="${REGION}-docker.pkg.dev"
+IMAGE_URI="${REPO_HOST}/${PROJECT_ID}/${REPO}/${IMAGE_NAME}:${TAG}"
+
+if ! gcloud artifacts repositories describe "$REPO" --location "$REGION" >/dev/null 2>&1; then
+  echo "📦 Creating Artifact Registry repository '${REPO}' in ${REGION}..."
+  gcloud artifacts repositories create "$REPO" \
+    --repository-format=docker \
+    --location="$REGION" \
+    --description="$DESCRIPTION"
+else
+  echo "✅ Artifact Registry repository '${REPO}' (location: ${REGION}) は既に存在します。"
+fi
+
+echo "🔐 Configuring docker auth for ${REPO_HOST}..."
+gcloud auth configure-docker "${REPO_HOST}" --quiet
+
+echo "🔨 Building image ${IMAGE_URI} ..."
+docker build -t "${IMAGE_URI}" "${BUILD_CONTEXT}"
+
+echo "📤 Pushing image to Artifact Registry..."
+docker push "${IMAGE_URI}"
+
+DEPLOY_ARGS=(
+  --image "${IMAGE_URI}"
+  --platform managed
+  --project "${PROJECT_ID}"
+  --region "${REGION}"
+  --port "${PORT}"
+  --memory "${MEMORY}"
+  --cpu "${CPU}"
+  --timeout "${TIMEOUT}"
+)
+
+if [[ -f "${ENV_FILE}" ]]; then
+  DEPLOY_ARGS+=(--env-vars-file="${ENV_FILE}")
+else
+  echo "ℹ️ ENV_FILE '${ENV_FILE}' は見つかりませんでした。--env-vars-file は指定しません。"
+fi
+
+if [[ "${ALLOW_UNAUTH}" == "true" ]]; then
+  DEPLOY_ARGS+=(--allow-unauthenticated)
+else
+  DEPLOY_ARGS+=(--no-allow-unauthenticated)
+fi
+
+echo "🚀 Deploying Cloud Run service '${SERVICE_NAME}' ..."
+gcloud run deploy "${SERVICE_NAME}" "${DEPLOY_ARGS[@]}"
 
 echo "✅ Deployment complete!"
-gcloud run services describe ${SERVICE_NAME} --region ${REGION} --format 'value(status.url)'
+gcloud run services describe "${SERVICE_NAME}" --region "${REGION}" --format 'value(status.url)'

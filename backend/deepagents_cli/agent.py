@@ -7,7 +7,7 @@ from typing import Any, Dict
 from deepagents import create_deep_agent
 from deepagents.backends import CompositeBackend
 from deepagents.backends.filesystem import FilesystemBackend
-from deepagents.backends.protocol import EditResult, WriteResult
+# from deepagents.backends.protocol import EditResult, WriteResult
 from deepagents.backends.sandbox import SandboxBackendProtocol
 from langchain.agents.middleware import (
     InterruptOnConfig,
@@ -25,49 +25,6 @@ from deepagents_cli.config import COLORS, config, console, get_default_coding_in
 # from deepagents_cli.integrations.sandbox_factory import get_default_working_dir
 from deepagents_cli.shell import ShellMiddleware
 from deepagents_cli.skills import SkillsMiddleware
-
-class CustumFilesystemBackend(FilesystemBackend):
-    """files_updateを付与してLangGraph UIに内容を表示させるバックエンド。"""
-
-    @staticmethod
-    def _create_files_update(path: str, content: str) -> Dict[str, str]:
-        return {path: content}
-
-    def write(self, file_path: str, content: str) -> WriteResult:
-        result = super().write(file_path=file_path, content=content)
-        if result.error:
-            return result
-        return WriteResult(path=result.path, files_update=self._create_files_update(file_path, content))
-
-    def edit(
-        self,
-        file_path: str,
-        old_string: str,
-        new_string: str,
-        replace_all: bool = False,
-    ) -> EditResult:
-        result = super().edit(
-            file_path=file_path,
-            old_string=old_string,
-            new_string=new_string,
-            replace_all=replace_all,
-        )
-        if result.error:
-            return result
-
-        resolved_path = self._resolve_path(file_path)
-        try:
-            with open(resolved_path, "r", encoding="utf-8") as f:
-                updated_content = f.read()
-        except OSError as exc:
-            return EditResult(error=f"Error reading updated file '{file_path}': {exc}")
-
-        return EditResult(
-            path=result.path,
-            files_update=self._create_files_update(file_path, updated_content),
-            occurrences=result.occurrences,
-        )
-
 
 def list_agents() -> None:
     """List all available agents."""
@@ -431,8 +388,7 @@ def create_cli_agent(
     if sandbox is None:
         # ========== LOCAL MODE ==========
         composite_backend = CompositeBackend(
-            # default=FilesystemBackend(),  # Current working directory
-            default=CustumFilesystemBackend(),
+            default=FilesystemBackend(),  # Current working directory
             routes={},  # No virtualization - use real paths
         )
 
@@ -503,8 +459,7 @@ def create_cli_agent(
         model=model,
         system_prompt=system_prompt,
         tools=tools,
-        # backend=composite_backend,
-        backend=CustumFilesystemBackend(),
+        backend=composite_backend,
         middleware=agent_middleware,
         interrupt_on=interrupt_on,
         checkpointer=InMemorySaver(),

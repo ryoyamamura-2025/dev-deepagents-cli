@@ -1,10 +1,12 @@
 import os
 import shutil
 from pathlib import Path
+from typing import Any, Dict
 
 from deepagents import create_deep_agent
 from deepagents.backends import CompositeBackend
 from deepagents.backends.filesystem import FilesystemBackend
+from deepagents.backends.protocol import EditResult, WriteResult
 from deepagents.backends.sandbox import SandboxBackendProtocol
 from langchain.agents.middleware import (
     InterruptOnConfig,
@@ -22,6 +24,49 @@ from deepagents_cli.config import COLORS, config, console, get_default_coding_in
 # from deepagents_cli.integrations.sandbox_factory import get_default_working_dir
 from deepagents_cli.shell import ShellMiddleware
 from deepagents_cli.skills import SkillsMiddleware
+
+
+class CustumFilesystemBackend(FilesystemBackend):
+    """files_updateを付与してLangGraph UIに内容を表示させるバックエンド。"""
+
+    @staticmethod
+    def _create_files_update(path: str, content: str) -> Dict[str, str]:
+        return {path: content}
+
+    def write(self, file_path: str, content: str) -> WriteResult:
+        result = super().write(file_path=file_path, content=content)
+        if result.error:
+            return result
+        return WriteResult(path=result.path, files_update=self._create_files_update(file_path, content))
+
+    def edit(
+        self,
+        file_path: str,
+        old_string: str,
+        new_string: str,
+        replace_all: bool = False,
+    ) -> EditResult:
+        result = super().edit(
+            file_path=file_path,
+            old_string=old_string,
+            new_string=new_string,
+            replace_all=replace_all,
+        )
+        if result.error:
+            return result
+
+        resolved_path = self._resolve_path(file_path)
+        try:
+            with open(resolved_path, "r", encoding="utf-8") as f:
+                updated_content = f.read()
+        except OSError as exc:
+            return EditResult(error=f"Error reading updated file '{file_path}': {exc}")
+
+        return EditResult(
+            path=result.path,
+            files_update=self._create_files_update(file_path, updated_content),
+            occurrences=result.occurrences,
+        )
 
 
 def list_agents() -> None:
@@ -89,6 +134,17 @@ def reset_agent(agent_name: str, source_agent: str | None = None) -> None:
     console.print(f"Location: {agent_dir}\n", style=COLORS["dim"])
 
 
+# 作業フォルダを環境変数から与えるための関数
+def _resolve_workdir() -> Path:
+    env_path = os.environ.get("WORKING_DIR")
+    if env_path:
+        candidate = Path(env_path).expanduser().resolve()
+        if candidate.exists():
+            return candidate
+        console.print(f"[yellow]WORKING_DIR が見つかりません: {candidate}。cwdを使用します。[/yellow]")
+    return Path.cwd()
+
+
 def get_system_prompt(assistant_id: str, sandbox_type: str | None = None) -> str:
     """Get the base system prompt for the agent.
 
@@ -120,7 +176,8 @@ All code execution and file operations happen in this sandbox environment.
 
 """
     else:
-        cwd = Path.cwd()
+        # cwd = Path.cwd()
+        cwd = _resolve_workdir()
         working_dir_section = f"""<env>
 Working directory: {cwd}
 </env>
@@ -386,7 +443,8 @@ def create_cli_agent(
     if sandbox is None:
         # ========== LOCAL MODE ==========
         composite_backend = CompositeBackend(
-            default=FilesystemBackend(virtual_mode=True),  # Current working directory
+            default=CustumFilesystemBackend(),
+            # default=FilesystemBackend(),  # Current working directory
             routes={},  # No virtualization - use real paths
         )
 
@@ -410,7 +468,8 @@ def create_cli_agent(
         if enable_shell:
             agent_middleware.append(
                 ShellMiddleware(
-                    workspace_root=str(Path.cwd()),
+                    # workspace_root=str(Path.cwd()),
+                    workspace_root=str(_resolve_workdir()),
                     env=os.environ,
                 )
             )
@@ -481,7 +540,8 @@ model = ChatGoogleGenerativeAI(
 # agentインスタンスの作成
 agent, _ = create_cli_agent(
     model=model,
-    assistant_id="assistant_123"
+    assistant_id="agent",
+    auto_approve=True,
 )
 
 # print(agent)

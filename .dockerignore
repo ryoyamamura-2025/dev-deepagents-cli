@@ -3,7 +3,8 @@ node_modules/
 __pycache__/
 *.pyc
 .env
+.env*
 .env.local
-*.md
 frontend/dist/
 .langgraph_api/
+.venv/
