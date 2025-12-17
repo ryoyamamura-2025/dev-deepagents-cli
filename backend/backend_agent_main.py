@@ -19,6 +19,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
 
+from deepagents_cli.tools import fetch_url, http_request
 from deepagents_cli.agent_memory import AgentMemoryMiddleware
 from deepagents_cli.config import COLORS, config, console, get_default_coding_instructions, settings
 # from deepagents_cli.integrations.sandbox_factory import get_default_working_dir
@@ -202,7 +203,7 @@ The filesystem backend is currently operating in: `{cwd}`
 
 Your skills are stored at: `{agent_dir_path}/skills/`
 Skills may contain scripts or supporting files. When executing skill scripts with bash, use the real filesystem path:
-Example: `bash python {agent_dir_path}/skills/web-research/script.py`
+Example: `bash uv run python {agent_dir_path}/skills/web-research/script.py`
 
 ### Human-in-the-Loop Tool Approval
 
@@ -540,8 +541,7 @@ model = ChatGoogleGenerativeAI(
 # agentインスタンスの作成
 agent, _ = create_cli_agent(
     model=model,
+     tools = [http_request, fetch_url],
     assistant_id="agent",
     auto_approve=True,
 )
-
-# print(agent)

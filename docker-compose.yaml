@@ -23,12 +23,11 @@ services:
       dockerfile: Dockerfile.dev
     volumes:
       - ./backend:/app
-      - ./backend/.deepagents:/root/.deepagents
+      - ./agent_config/.deepagents:/root/.deepagents
     ports:
       - "8124:8124"
     env_file:
-      - .env.local
       - backend/.env
     environment:
       - PYTHONUNBUFFERED=1
-      - WATCH_DIR=/app/resource
+      - WATCH_DIR=/app/workspace

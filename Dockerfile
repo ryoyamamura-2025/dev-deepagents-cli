@@ -37,6 +37,7 @@ RUN uv sync --locked --no-install-project
 
 # ここで初めてソースをコピー
 COPY ./backend ./
+COPY ./agent_config /root
 
 # プロジェクト本体を同期
 RUN uv sync

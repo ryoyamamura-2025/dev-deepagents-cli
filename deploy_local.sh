@@ -42,7 +42,6 @@ case "$1" in
     docker run -it \
       --name ${CONTAINER_NAME} \
       -p 3232:8080 \
-      -v "$PWD"/backend/resource:/app/workspace \
       --env-file ./.env.local \
       ${IMAGE_NAME}:${TAG} \
       /bin/bash
@@ -61,7 +60,6 @@ case "$1" in
     docker run -it \
       --name ${CONTAINER_NAME} \
       -p 3232:8080 \
-      -v "$PWD"/backend/resource:/app/workspace \
       --env-file ./.env.local \
       ${IMAGE_NAME}:${TAG} \
       /bin/bash
