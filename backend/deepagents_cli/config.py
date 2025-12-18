@@ -175,8 +175,7 @@ class Settings:
     @property
     def has_anthropic(self) -> bool:
         """Check if Anthropic API key is configured."""
-        return True
-        # return self.anthropic_api_key is not None
+        return self.anthropic_api_key is not None
 
     @property
     def has_google(self) -> bool:

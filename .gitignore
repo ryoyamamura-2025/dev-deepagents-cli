@@ -1,3 +1,6 @@
+ # コンテナ内の workspace ファイル
+backend/workspace/
+
 # deploy
 deploy.sh
 

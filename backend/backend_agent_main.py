@@ -21,7 +21,7 @@ from langgraph.runtime import Runtime
 
 from deepagents_cli.tools import fetch_url, http_request
 from deepagents_cli.agent_memory import AgentMemoryMiddleware
-from deepagents_cli.config import COLORS, config, console, get_default_coding_instructions, settings
+from deepagents_cli.config import COLORS, config, console, get_default_coding_instructions, settings, create_model
 # from deepagents_cli.integrations.sandbox_factory import get_default_working_dir
 from deepagents_cli.shell import ShellMiddleware
 from deepagents_cli.skills import SkillsMiddleware
@@ -203,7 +203,7 @@ The filesystem backend is currently operating in: `{cwd}`
 
 Your skills are stored at: `{agent_dir_path}/skills/`
 Skills may contain scripts or supporting files. When executing skill scripts with bash, use the real filesystem path:
-Example: `bash uv run python {agent_dir_path}/skills/web-research/script.py`
+Example: `bash python {agent_dir_path}/skills/web-research/script.py`
 
 ### Human-in-the-Loop Tool Approval
 
@@ -525,23 +525,27 @@ def create_cli_agent(
     return agent, composite_backend
 
 
-# モデルインスタンスの作成
+# -------------------------------------------
+# main プロセス
+# -------------------------------------------
 from dotenv import load_dotenv
 load_dotenv()
 
-from langchain_google_genai import ChatGoogleGenerativeAI
-model_name = os.environ.get("GOOGLE_MODEL", "gemini-2.5-pro")
-console.print(f"[dim]Using Google Gemini model: {model_name}[/dim]")
-model = ChatGoogleGenerativeAI(
-            model=model_name,
-            # temperature=0,
-            max_tokens=None,
-        )
+# モデルインスタンスの作成
+model = create_model()
+
+# tool の設定
+tools = [http_request, fetch_url]
 
 # agentインスタンスの作成
 agent, _ = create_cli_agent(
     model=model,
-     tools = [http_request, fetch_url],
+    tools=tools,
     assistant_id="agent",
     auto_approve=True,
+    enable_memory=True,
+    enable_skills=True,
+    enable_shell=True,
 )
+
+# print(agent)

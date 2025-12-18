@@ -7,7 +7,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-def download_agent_config_from_gcs(
+def download_from_gcs(
     bucket_name: str,
     source_prefix: str,
     destination_dir: str
@@ -28,12 +28,22 @@ def download_agent_config_from_gcs(
 
         logger.info(f"Downloading agent_config from gs://{bucket_name}/{source_prefix} to {destination_dir}")
 
+        # Normalize prefix so we can strip it from blob paths reliably.
+        # We store downloaded files under destination_dir *without* the prefix path.
+        normalized_prefix = (source_prefix or "").strip("/")
+        prefix_with_slash = f"{normalized_prefix}/" if normalized_prefix else ""
+        print(f"prefix_with_slash: {prefix_with_slash}")
+
         # Initialize GCS client
         client = storage.Client()
         bucket = client.bucket(bucket_name)
 
         # List all blobs with the given prefix
-        blobs = bucket.list_blobs(prefix=source_prefix)
+        # IMPORTANT: GCS prefix match is a simple string prefix.
+        # If we want "directory-like" semantics, ensure we list with a trailing slash,
+        # otherwise e.g. prefix="a/b" would also match "a/bc/...".
+        list_prefix = prefix_with_slash if prefix_with_slash else None
+        blobs = bucket.list_blobs(prefix=list_prefix)
 
         download_count = 0
         for blob in blobs:
@@ -42,7 +52,19 @@ def download_agent_config_from_gcs(
                 continue
 
             # Calculate local file path
-            relative_path = blob.name
+            # Strip the prefix from the GCS object path (if present)
+            if prefix_with_slash and blob.name.startswith(prefix_with_slash):
+                relative_path = blob.name[len(prefix_with_slash):]
+            elif normalized_prefix and blob.name == normalized_prefix:
+                # Edge case: object name is exactly the prefix (rare, but be safe)
+                relative_path = Path(blob.name).name
+            else:
+                relative_path = blob.name
+
+            # Avoid writing to destination_dir directly if we somehow end up with empty path
+            if not relative_path:
+                logger.warning(f"Skipping blob with empty relative path after prefix stripping: {blob.name}")
+                continue
             local_file_path = Path(destination_dir) / relative_path
 
             # Create parent directories
@@ -61,50 +83,39 @@ def download_agent_config_from_gcs(
         return False
 
 
-def ensure_agent_config(
-    bucket_name: Optional[str] = None,
-    source_prefix: str = "agent_config",
-    destination_dir: str = "/root",
-    fallback_dir: Optional[str] = None
+# フォールバックは機能してない
+def ensure_files(
+    bucket_name: str,
+    source_prefix: str,
+    destination_dir: str,
+    fallback_dir: str
 ) -> bool:
     """
-    Ensure agent_config exists by downloading from GCS or using local fallback.
+    Ensure files exists by downloading from GCS or using local fallback.
 
     Args:
-        bucket_name: GCS bucket name (if None, will try to get from env)
+        bucket_name: GCS bucket name
         source_prefix: Source path prefix in GCS
         destination_dir: Local destination directory
         fallback_dir: Local fallback directory if GCS download fails
 
     Returns:
-        True if agent_config is available, False otherwise
+        True if files are available, False otherwise
     """
-    # Get bucket name from environment if not provided
-    if bucket_name is None:
-        bucket_name = os.getenv("GCS_AGENT_CONFIG_BUCKET")
-
-    # Check if destination already exists
-    agent_config_path = Path(destination_dir) / source_prefix
-    if agent_config_path.exists():
-        logger.info(f"agent_config already exists at {agent_config_path}")
-        return True
 
     # Try to download from GCS if bucket is configured
-    if bucket_name:
-        logger.info(f"Attempting to download agent_config from Cloud Storage bucket: {bucket_name}")
-        if download_agent_config_from_gcs(bucket_name, source_prefix, destination_dir):
-            return True
-        logger.warning("Failed to download from Cloud Storage, trying fallback")
-    else:
-        logger.info("GCS_AGENT_CONFIG_BUCKET not set, skipping Cloud Storage download")
+    logger.info(f"Attempting to download files from Cloud Storage bucket: {bucket_name}")
+    if download_from_gcs(bucket_name, source_prefix, destination_dir):
+        return True
+    logger.warning("Failed to download from Cloud Storage, trying fallback")
 
     # Use local fallback if provided
     if fallback_dir:
-        fallback_path = Path(fallback_dir) / source_prefix
+        fallback_path = Path(fallback_dir)
         if fallback_path.exists():
             logger.info(f"Using local fallback: {fallback_path}")
             import shutil
-            shutil.copytree(fallback_path, agent_config_path)
+            shutil.copytree(fallback_path, Path(destination_dir))
             return True
         else:
             logger.warning(f"Fallback directory not found: {fallback_path}")

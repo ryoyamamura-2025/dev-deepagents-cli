@@ -5,9 +5,9 @@ from pydantic import BaseModel
 import asyncio
 import json
 import logging
+
 from file_api.file_watcher import FileWatcher
 from file_api.config import WATCH_DIR, CORS_ORIGINS, MAX_FILE_SIZE
-from file_api.cloud_storage import ensure_agent_config
 import httpx
 
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +16,7 @@ from fastapi import FastAPI, WebSocket, HTTPException, WebSocketDisconnect, Requ
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
+from file_api import cloud_storage as cs
 
 # Configure logging
 logging.basicConfig(
@@ -25,6 +26,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+# LangGraph dev subprocess handle (optional autostart)
+_langgraph_proc: Optional[asyncio.subprocess.Process] = None
 
 # CORS設定（フロントエンドからのアクセスを許可）
 app.add_middleware(
@@ -42,85 +46,132 @@ app.add_middleware(
 # LangGraph Server URL
 LANGGRAPH_API_URL = os.getenv("LANGGRAPH_API_URL", "http://localhost:2024")
 
+# グローバルなhttpxクライアント（ストリーミング対応のため接続を維持）
+_httpx_client: Optional[httpx.AsyncClient] = None
+
+async def _start_langgraph_dev_background() -> None:
+    """
+    APIサーバーのstartup完了後に、langgraph dev をバックグラウンド起動する。
+    ※ create_task で呼び出し、startup をブロックしない。
+    """
+    global _langgraph_proc
+
+    if _langgraph_proc is not None and _langgraph_proc.returncode is None:
+        return
+
+    argv = ["uv", "run", "langgraph", "dev", "--allow-blocking", "--host", "0.0.0.0", "--port", "2024"]
+
+    try:
+        _langgraph_proc = await asyncio.create_subprocess_exec(
+            *argv,
+            # 標準出力/標準エラーは親プロセスに流してログを見えるようにする
+            env=os.environ.copy(),
+        )
+        logger.info("Started langgraph dev (pid=%s)", _langgraph_proc.pid)
+    except FileNotFoundError as e:
+        logger.error("Failed to start langgraph dev (command not found): %s", e)
+    except Exception as e:
+        logger.exception("Failed to start langgraph dev: %s", e)
+
 @app.api_route("/agent/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def proxy_to_langgraph(path: str, request: Request):
     """LangGraph APIへのプロキシ"""
+    if _httpx_client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="HTTP client not initialized. Server may be starting up."
+        )
+
     try:
-        async with httpx.AsyncClient() as client:
-            # LangGraphのAPIエンドポイントに合わせてパスを調整
-            # /threads へのGETリクエストは /threads/search へのPOSTに変換
-            if path == "threads" and request.method == "GET":
-                path = "threads/search"
-                method = "POST"
-                body = await request.body()
-                # クエリパラメータをボディに変換
-                if request.url.query:
-                    from urllib.parse import parse_qs
-                    params = parse_qs(request.url.query)
-                    query_body = {}
-                    if "limit" in params:
-                        query_body["limit"] = int(params["limit"][0])
-                    if "offset" in params:
-                        query_body["offset"] = int(params["offset"][0])
-                    if "status" in params:
-                        query_body["status"] = params["status"][0]
-                    body = json.dumps(query_body).encode() if query_body else b"{}"
-            else:
-                method = request.method
-                body = await request.body()
-            
-            url = f"{LANGGRAPH_API_URL}/{path}"
-            
-            # クエリパラメータも転送（GETリクエストの場合のみ）
-            if request.url.query and method != "POST":
-                url = f"{url}?{request.url.query}"
-            
-            try:
-                response = await client.request(
+        # LangGraphのAPIエンドポイントに合わせてパスを調整
+        # /threads へのGETリクエストは /threads/search へのPOSTに変換
+        if path == "threads" and request.method == "GET":
+            path = "threads/search"
+            method = "POST"
+            body = await request.body()
+            # クエリパラメータをボディに変換
+            if request.url.query:
+                from urllib.parse import parse_qs
+                params = parse_qs(request.url.query)
+                query_body = {}
+                if "limit" in params:
+                    query_body["limit"] = int(params["limit"][0])
+                if "offset" in params:
+                    query_body["offset"] = int(params["offset"][0])
+                if "status" in params:
+                    query_body["status"] = params["status"][0]
+                body = json.dumps(query_body).encode() if query_body else b"{}"
+        else:
+            method = request.method
+            body = await request.body()
+
+        url = f"{LANGGRAPH_API_URL}/{path}"
+
+        # クエリパラメータも転送（GETリクエストの場合のみ）
+        if request.url.query and method != "POST":
+            url = f"{url}?{request.url.query}"
+
+        try:
+            # まずヘッダーを取得するためにリクエストを開始
+            response = await _httpx_client.send(
+                _httpx_client.build_request(
                     method=method,
                     url=url,
                     content=body,
                     headers={
-                        key: value 
+                        key: value
                         for key, value in request.headers.items()
                         if key.lower() not in ["host", "content-length"]
                     },
-                    timeout=300.0,  # 5分タイムアウト
+                ),
+                stream=True,
+            )
+
+            # ストリーミングレスポンスの場合
+            if response.headers.get("content-type", "").startswith("text/event-stream"):
+                async def stream_generator():
+                    try:
+                        async for chunk in response.aiter_bytes():
+                            yield chunk
+                    finally:
+                        await response.aclose()
+
+                return StreamingResponse(
+                    stream_generator(),
+                    status_code=response.status_code,
+                    headers=dict(response.headers),
+                    media_type="text/event-stream",
                 )
 
-                # ストリーミングレスポンスの場合
-                if response.headers.get("content-type", "").startswith("text/event-stream"):
-                    return StreamingResponse(
-                        response.aiter_bytes(),
-                        status_code=response.status_code,
-                        headers=dict(response.headers),
-                        media_type="text/event-stream",
-                    )
+            # 非ストリーミングレスポンスの場合は全体を読み込む
+            try:
+                content = await response.aread()
+                return Response(
+                    content=content,
+                    status_code=response.status_code,
+                    headers={
+                        key: value
+                        for key, value in response.headers.items()
+                        if key.lower() not in ["content-encoding", "content-length", "transfer-encoding"]
+                    },
+                )
+            finally:
+                await response.aclose()
 
-            except httpx.ConnectError:
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"LangGraph server is not available at {LANGGRAPH_API_URL}. Please ensure langgraph dev is running."
-                )
-            except httpx.TimeoutException:
-                raise HTTPException(
-                    status_code=504,
-                    detail="Request to LangGraph server timed out"
-                )
-            except httpx.HTTPError as e:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Error connecting to LangGraph server: {str(e)}"
-                )
-            
-            return Response(
-                content=response.content,
-                status_code=response.status_code,
-                headers={
-                    key: value 
-                    for key, value in response.headers.items()
-                    if key.lower() not in ["content-encoding", "content-length", "transfer-encoding"]
-                },
+        except httpx.ConnectError:
+            raise HTTPException(
+                status_code=503,
+                detail=f"LangGraph server is not available at {LANGGRAPH_API_URL}. Please ensure langgraph dev is running."
+            )
+        except httpx.TimeoutException:
+            raise HTTPException(
+                status_code=504,
+                detail="Request to LangGraph server timed out"
+            )
+        except httpx.HTTPError as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Error connecting to LangGraph server: {str(e)}"
             )
     except HTTPException:
         raise
@@ -139,25 +190,44 @@ file_watcher = None
 
 @app.on_event("startup")
 async def startup():
-    """サーバー起動時にファイル監視を開始"""
-    global file_watcher
+    # httpxクライアントを初期化
+    global _httpx_client
+    _httpx_client = httpx.AsyncClient(timeout=300.0)
+    logger.info("Initialized httpx client for LangGraph proxy")
 
-    # Download agent_config from Cloud Storage or use local fallback
+    # GCS との同期
+    # /root/.deepagentsの作成
     logger.info("Ensuring agent_config is available...")
-    bucket_name = os.getenv("GCS_AGENT_CONFIG_BUCKET")
-    source_prefix = os.getenv("GCS_AGENT_CONFIG_PREFIX", "agent_config")
+    bucket_name = os.getenv("GCS_BUCKET")
+    source_prefix = os.getenv("GCS_AGENT_CONFIG_PREFIX", "/for-deepagents/agent_config")
     destination_dir = os.getenv("AGENT_CONFIG_DEST_DIR", "/root")
-    fallback_dir = os.getenv("AGENT_CONFIG_FALLBACK_DIR", "./agent_config")
 
-    if not ensure_agent_config(
+    if not cs.download_from_gcs(
         bucket_name=bucket_name,
         source_prefix=source_prefix,
         destination_dir=destination_dir,
-        fallback_dir=fallback_dir if os.path.exists(fallback_dir) else None
     ):
         logger.warning("Could not ensure agent_config availability. Agent may not function properly.")
     else:
         logger.info("agent_config is ready")
+
+    # /app/workspaceの作成
+    logger.info("Downloading workspace files...")
+    source_prefix = os.getenv("GCS_WORKSPACE_PREFIX", "/for-deepagents/workspace_yamamura")
+    destination_dir = os.getenv("WORKSPACE_DEST_DIR", "/app/workspace")
+
+    if not cs.download_from_gcs(
+        bucket_name=bucket_name,
+        source_prefix=source_prefix,
+        destination_dir=destination_dir,
+    ):
+        logger.warning("Could not download workspace files.")
+    else:
+        logger.info("workspace files are ready")
+
+
+    """サーバー起動時にファイル監視を開始"""
+    global file_watcher
 
     # イベントループを取得してFileWatcherに渡す
     loop = asyncio.get_event_loop()
@@ -165,12 +235,39 @@ async def startup():
     file_watcher.start()
     logger.info(f"Server started. Watching directory: {WATCH_DIR}")
 
+    # APIサーバー起動（startup処理）完了後に langgraph dev を起動（startup自体はブロックしない）
+    asyncio.create_task(_start_langgraph_dev_background())
+
 
 @app.on_event("shutdown")
 async def shutdown():
     """サーバー停止時にファイル監視を停止"""
+    # httpxクライアントをクローズ
+    global _httpx_client
+    if _httpx_client is not None:
+        await _httpx_client.aclose()
+        logger.info("Closed httpx client")
+        _httpx_client = None
+
     if file_watcher is not None:
         file_watcher.stop()
+
+    # langgraph dev をこのプロセスから起動している場合は停止
+    global _langgraph_proc
+    if _langgraph_proc is not None and _langgraph_proc.returncode is None:
+        try:
+            _langgraph_proc.terminate()
+            await asyncio.wait_for(_langgraph_proc.wait(), timeout=5.0)
+            logger.info("Stopped langgraph dev (pid=%s)", _langgraph_proc.pid)
+        except asyncio.TimeoutError:
+            _langgraph_proc.kill()
+            await _langgraph_proc.wait()
+            logger.warning("Killed langgraph dev (pid=%s) after timeout", _langgraph_proc.pid)
+        except Exception as e:
+            logger.exception("Error stopping langgraph dev: %s", e)
+        finally:
+            _langgraph_proc = None
+
     print("Server stopped")
 
 
