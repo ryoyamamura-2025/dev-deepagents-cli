@@ -295,6 +295,7 @@ function HomePageContent() {
     <ClientProvider
       deploymentUrl={config.deploymentUrl}
       apiKey={langsmithApiKey}
+      userId={config.userId}
     >
       <HomePageInner
         config={config}

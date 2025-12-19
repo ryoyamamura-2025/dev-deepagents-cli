@@ -7,7 +7,8 @@ import json
 import logging
 
 from file_api.file_watcher import FileWatcher
-from file_api.config import WATCH_DIR, CORS_ORIGINS, MAX_FILE_SIZE
+from file_api.config import WATCH_DIR, WATCH_DIR_BASE, get_user_watch_dir, CORS_ORIGINS, MAX_FILE_SIZE
+from file_api.user_utils import get_user_id_from_request, get_user_id_from_websocket
 import httpx
 
 from fastapi.staticfiles import StaticFiles
@@ -185,8 +186,27 @@ async def proxy_to_langgraph(path: str, request: Request):
 # ファイルエクスプローラー
 # ========================================
 
-# ファイル監視インスタンス（イベントループは後で設定）
-file_watcher = None
+# ユーザーIDごとのファイル監視インスタンス
+file_watchers: Dict[str, FileWatcher] = {}
+
+def get_or_create_file_watcher(user_id: str) -> FileWatcher:
+    """
+    Get or create a FileWatcher for a specific user.
+
+    Args:
+        user_id: User ID
+
+    Returns:
+        FileWatcher instance for the user
+    """
+    if user_id not in file_watchers:
+        user_watch_dir = get_user_watch_dir(user_id)
+        loop = asyncio.get_event_loop()
+        watcher = FileWatcher(user_watch_dir, event_loop=loop)
+        watcher.start()
+        file_watchers[user_id] = watcher
+        logger.info(f"Started file watcher for user {user_id} at {user_watch_dir}")
+    return file_watchers[user_id]
 
 @app.on_event("startup")
 async def startup():
@@ -211,10 +231,11 @@ async def startup():
     else:
         logger.info("agent_config is ready")
 
-    # /app/workspaceの作成
-    logger.info("Downloading workspace files...")
+    # /app/workspaceの作成（デフォルトユーザー用）
+    # 注: ユーザーIDベースのworkspaceは各ユーザーのアクセス時に作成される
+    logger.info("Downloading default workspace files...")
     source_prefix = os.getenv("GCS_WORKSPACE_PREFIX", "/for-deepagents/workspace_yamamura")
-    destination_dir = os.getenv("WORKSPACE_DEST_DIR", "/app/workspace")
+    destination_dir = os.getenv("WORKSPACE_DEST_DIR", "/app/workspace/default")
 
     if not cs.download_from_gcs(
         bucket_name=bucket_name,
@@ -225,15 +246,8 @@ async def startup():
     else:
         logger.info("workspace files are ready")
 
-
-    """サーバー起動時にファイル監視を開始"""
-    global file_watcher
-
-    # イベントループを取得してFileWatcherに渡す
-    loop = asyncio.get_event_loop()
-    file_watcher = FileWatcher(WATCH_DIR, event_loop=loop)
-    file_watcher.start()
-    logger.info(f"Server started. Watching directory: {WATCH_DIR}")
+    # ファイル監視はユーザーアクセス時に動的に作成される
+    logger.info(f"Server started. File watchers will be created per user.")
 
     # APIサーバー起動（startup処理）完了後に langgraph dev を起動（startup自体はブロックしない）
     asyncio.create_task(_start_langgraph_dev_background())
@@ -249,8 +263,13 @@ async def shutdown():
         logger.info("Closed httpx client")
         _httpx_client = None
 
-    if file_watcher is not None:
-        file_watcher.stop()
+    # すべてのfile_watchersを停止
+    for user_id, watcher in file_watchers.items():
+        try:
+            watcher.stop()
+            logger.info(f"Stopped file watcher for user {user_id}")
+        except Exception as e:
+            logger.error(f"Error stopping file watcher for user {user_id}: {e}")
 
     # langgraph dev をこのプロセスから起動している場合は停止
     global _langgraph_proc
@@ -306,11 +325,12 @@ async def health():
 
 
 @app.get("/api/files")
-async def list_files(path: str = ""):
+async def list_files(request: Request, path: str = ""):
     """
     ファイル一覧を取得
 
     Args:
+        request: FastAPI Request object
         path: 相対パス（オプション、デフォルトはルート）
 
     Returns:
@@ -330,7 +350,11 @@ async def list_files(path: str = ""):
         }
     """
     try:
-        target_dir = sanitize_path(path, WATCH_DIR)
+        # ユーザーIDを取得
+        user_id = get_user_id_from_request(request)
+        user_watch_dir = get_user_watch_dir(user_id)
+
+        target_dir = sanitize_path(path, user_watch_dir)
 
         if not target_dir.exists():
             raise HTTPException(status_code=404, detail="Directory not found")
@@ -344,7 +368,7 @@ async def list_files(path: str = ""):
             stat = item.stat()
             items.append({
                 "name": item.name,
-                "path": str(item.relative_to(WATCH_DIR)),
+                "path": str(item.relative_to(user_watch_dir)),
                 "type": "directory" if item.is_dir() else "file",
                 "size": stat.st_size if item.is_file() else 0,
                 "modified": stat.st_mtime,
@@ -354,7 +378,7 @@ async def list_files(path: str = ""):
         return {
             "success": True,
             "items": items,
-            "current_path": str(target_dir.relative_to(WATCH_DIR))
+            "current_path": str(target_dir.relative_to(user_watch_dir))
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -363,11 +387,12 @@ async def list_files(path: str = ""):
 
 
 @app.get("/api/files/{file_path:path}")
-async def read_file(file_path: str, raw: bool = False):
+async def read_file(request: Request, file_path: str, raw: bool = False):
     """
     ファイル内容を取得
 
     Args:
+        request: FastAPI Request object
         file_path: 相対ファイルパス
         raw: Trueの場合、バイナリファイルとして配信（画像・PDF用）
 
@@ -380,12 +405,16 @@ async def read_file(file_path: str, raw: bool = False):
             "size": int,
             "modified": float (timestamp)
         }
-        
+
         raw=True:
         バイナリファイルを直接配信（Content-Type自動設定）
     """
     try:
-        target_file = sanitize_path(file_path, WATCH_DIR)
+        # ユーザーIDを取得
+        user_id = get_user_id_from_request(request)
+        user_watch_dir = get_user_watch_dir(user_id)
+
+        target_file = sanitize_path(file_path, user_watch_dir)
 
         if not target_file.exists():
             raise HTTPException(status_code=404, detail="File not found")
@@ -415,18 +444,18 @@ async def read_file(file_path: str, raw: bool = False):
         # テキストファイルとして読み取り
         try:
             content = target_file.read_text(encoding="utf-8")
-        except UnicodeDecodeError:    
+        except UnicodeDecodeError:
             raise HTTPException(
                 status_code=400,
                 detail="Binary file not supported. Use ?raw=true for binary files"
             )
-        
+
         stat = target_file.stat()
 
         return {
             "success": True,
             "content": content,
-            "path": str(target_file.relative_to(WATCH_DIR)),
+            "path": str(target_file.relative_to(user_watch_dir)),
             "size": stat.st_size,
             "modified": stat.st_mtime
         }
@@ -443,11 +472,12 @@ class FileUpdateRequest(BaseModel):
 
 
 @app.put("/api/files/{file_path:path}")
-async def update_file(file_path: str, request: FileUpdateRequest):
+async def update_file(http_request: Request, file_path: str, request: FileUpdateRequest):
     """
     ファイル内容を更新
 
     Args:
+        http_request: FastAPI Request object
         file_path: 相対ファイルパス
         request: 更新内容を含むリクエストボディ
 
@@ -459,7 +489,11 @@ async def update_file(file_path: str, request: FileUpdateRequest):
         }
     """
     try:
-        target_file = sanitize_path(file_path, WATCH_DIR)
+        # ユーザーIDを取得
+        user_id = get_user_id_from_request(http_request)
+        user_watch_dir = get_user_watch_dir(user_id)
+
+        target_file = sanitize_path(file_path, user_watch_dir)
 
         # 親ディレクトリが存在するか確認
         if not target_file.parent.exists():
@@ -478,7 +512,7 @@ async def update_file(file_path: str, request: FileUpdateRequest):
         return {
             "success": True,
             "message": "File updated successfully",
-            "path": str(target_file.relative_to(WATCH_DIR))
+            "path": str(target_file.relative_to(user_watch_dir))
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -489,11 +523,12 @@ async def update_file(file_path: str, request: FileUpdateRequest):
 
 
 @app.delete("/api/files/{file_path:path}")
-async def delete_file(file_path: str):
+async def delete_file(request: Request, file_path: str):
     """
     ファイルまたはディレクトリを削除
 
     Args:
+        request: FastAPI Request object
         file_path: 相対ファイルパス
 
     Returns:
@@ -504,7 +539,11 @@ async def delete_file(file_path: str):
         }
     """
     try:
-        target_path = sanitize_path(file_path, WATCH_DIR)
+        # ユーザーIDを取得
+        user_id = get_user_id_from_request(request)
+        user_watch_dir = get_user_watch_dir(user_id)
+
+        target_path = sanitize_path(file_path, user_watch_dir)
 
         if not target_path.exists():
             raise HTTPException(status_code=404, detail="File or directory not found")
@@ -519,7 +558,7 @@ async def delete_file(file_path: str):
         return {
             "success": True,
             "message": "File deleted successfully",
-            "path": str(target_path.relative_to(WATCH_DIR))
+            "path": str(target_path.relative_to(user_watch_dir))
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -531,6 +570,7 @@ async def delete_file(file_path: str):
 
 @app.post("/api/files/upload")
 async def upload_files(
+    request: Request,
     files: List[UploadFile],
     path: str = Form("")
 ):
@@ -538,6 +578,7 @@ async def upload_files(
     ファイルをアップロード
 
     Args:
+        request: FastAPI Request object
         files: アップロードするファイルのリスト
         path: アップロード先の相対パス（オプション）
 
@@ -549,7 +590,11 @@ async def upload_files(
         }
     """
     try:
-        target_dir = sanitize_path(path, WATCH_DIR)
+        # ユーザーIDを取得
+        user_id = get_user_id_from_request(request)
+        user_watch_dir = get_user_watch_dir(user_id)
+
+        target_dir = sanitize_path(path, user_watch_dir)
 
         if not target_dir.exists():
             raise HTTPException(status_code=404, detail="Target directory not found")
@@ -571,7 +616,7 @@ async def upload_files(
             content = await file.read()
             target_file.write_bytes(content)
 
-            uploaded_files.append(str(target_file.relative_to(WATCH_DIR)))
+            uploaded_files.append(str(target_file.relative_to(user_watch_dir)))
 
         return {
             "success": True,
@@ -591,7 +636,8 @@ async def websocket_endpoint(websocket: WebSocket):
     WebSocketエンドポイント（ファイル変更通知）
 
     クライアント接続時:
-    - ファイル監視を登録
+    - ユーザーIDを取得
+    - ユーザー専用のファイル監視を登録
     - 変更イベントをリアルタイム送信
 
     送信メッセージ形式:
@@ -602,23 +648,29 @@ async def websocket_endpoint(websocket: WebSocket):
     }
     """
     await websocket.accept()
-    print("WebSocket client connected")
+
+    # ユーザーIDを取得
+    user_id = get_user_id_from_websocket(websocket)
+    logger.info(f"WebSocket client connected for user {user_id}")
+
+    # ユーザー専用のFileWatcherを取得または作成
+    user_watcher = get_or_create_file_watcher(user_id)
+    user_watch_dir = get_user_watch_dir(user_id)
 
     async def on_change(event_type: str, src_path: str, is_directory: bool):
         """ファイル変更時のコールバック"""
         try:
-            relative_path = str(Path(src_path).relative_to(WATCH_DIR))
+            relative_path = str(Path(src_path).relative_to(user_watch_dir))
             await websocket.send_json({
                 "event": event_type,
                 "path": relative_path,
                 "is_directory": is_directory
             })
         except Exception as e:
-            print(f"Error sending WebSocket message: {e}")
+            logger.error(f"Error sending WebSocket message: {e}")
 
     # ファイル監視にコールバック登録
-    if file_watcher is not None:
-        file_watcher.add_listener(on_change)
+    user_watcher.add_listener(on_change)
 
     try:
         # WebSocket接続を維持（pingメッセージで接続確認）
@@ -627,13 +679,12 @@ async def websocket_endpoint(websocket: WebSocket):
             if data == "ping":
                 await websocket.send_text("pong")
     except WebSocketDisconnect:
-        print("WebSocket client disconnected")
+        logger.info(f"WebSocket client disconnected for user {user_id}")
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        logger.error(f"WebSocket error: {e}")
     finally:
         # クライアント切断時にリスナー削除
-        if file_watcher is not None:
-            file_watcher.remove_listener(on_change)
+        user_watcher.remove_listener(on_change)
 
 # フロントエンド配信（本番環境用）
 STATIC_DIR = os.getenv("STATIC_DIR", "../static-build")

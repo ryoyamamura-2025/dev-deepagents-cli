@@ -2,14 +2,37 @@
 import os
 from pathlib import Path
 
-# 環境変数で監視ディレクトリを指定可能
-WATCH_DIR = Path(os.getenv(
+# 環境変数でベース監視ディレクトリを指定可能
+# ユーザーごとのディレクトリは WATCH_DIR_BASE/{user_id}/ となる
+WATCH_DIR_BASE = Path(os.getenv(
     "WATCH_DIR",
-    "/home/ryoyamamura/dev-cli-agent/backend/resource"
+    "/app/workspace"
 ))
 
-# ディレクトリが存在しない場合は作成
+# ベースディレクトリが存在しない場合は作成
+WATCH_DIR_BASE.mkdir(parents=True, exist_ok=True)
+
+# 後方互換性のため（従来のコードで使われている場合）
+# デフォルトユーザーのディレクトリをWATCH_DIRとして設定
+WATCH_DIR = WATCH_DIR_BASE / "default"
 WATCH_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def get_user_watch_dir(user_id: str) -> Path:
+    """
+    Get the watch directory for a specific user.
+    Creates the directory if it doesn't exist.
+
+    Args:
+        user_id: User ID
+
+    Returns:
+        Path to user's watch directory
+    """
+    user_dir = WATCH_DIR_BASE / user_id
+    user_dir.mkdir(parents=True, exist_ok=True)
+    return user_dir
+
 
 # CORS設定
 CORS_ORIGINS = os.getenv(

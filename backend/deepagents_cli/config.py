@@ -198,9 +198,10 @@ class Settings:
         """Get the base user-level .deepagents directory.
 
         Returns:
-            Path to ~/.deepagents
+            Path to ~/.deepagents/{user_id} (user_id from USER_ID env var or 'default')
         """
-        return Path.home() / ".deepagents"
+        user_id = os.getenv("USER_ID", "default")
+        return Path.home() / ".deepagents" / user_id
 
     def get_user_agent_md_path(self, agent_name: str) -> Path:
         """Get user-level agent.md path for a specific agent.
@@ -211,9 +212,10 @@ class Settings:
             agent_name: Name of the agent
 
         Returns:
-            Path to ~/.deepagents/{agent_name}/agent.md
+            Path to ~/.deepagents/{user_id}/{agent_name}/agent.md
         """
-        return Path.home() / ".deepagents" / agent_name / "agent.md"
+        user_id = os.getenv("USER_ID", "default")
+        return Path.home() / ".deepagents" / user_id / agent_name / "agent.md"
 
     def get_project_agent_md_path(self) -> Path | None:
         """Get project-level agent.md path.
@@ -242,7 +244,7 @@ class Settings:
             agent_name: Name of the agent
 
         Returns:
-            Path to ~/.deepagents/{agent_name}
+            Path to ~/.deepagents/{user_id}/{agent_name}
         """
         if not self._is_valid_agent_name(agent_name):
             msg = (
@@ -250,7 +252,8 @@ class Settings:
                 "Agent names can only contain letters, numbers, hyphens, underscores, and spaces."
             )
             raise ValueError(msg)
-        return Path.home() / ".deepagents" / agent_name
+        user_id = os.getenv("USER_ID", "default")
+        return Path.home() / ".deepagents" / user_id / agent_name
 
     def ensure_agent_dir(self, agent_name: str) -> Path:
         """Ensure the global agent directory exists and return its path.
