@@ -2,8 +2,7 @@
 
 import useSWR from 'swr';
 import { useState, useEffect, useCallback } from 'react';
-
-const FILE_API_URL = process.env.NEXT_PUBLIC_FILE_API_URL || '';
+import { FILE_API_URL } from '@/lib/config';
 
 export interface FileSystemItem {
   name: string;
@@ -123,14 +122,32 @@ export function useFileBrowser(initialPath: string = "") {
 
   // ファイル読み取り
   const readFile = useCallback(async (filePath: string): Promise<FileContentResponse> => {
-    const response = await fetch(`${FILE_API_URL}/api/files/${filePath}`);
+    // パスのエンコード処理（特殊文字対応）
+    let encodedPath = filePath;
+    if (filePath && filePath.trim() !== '') {
+      const pathSegments = filePath.split('/').map(segment => {
+        if (segment === '') return '';
+        return encodeURIComponent(segment);
+      });
+      encodedPath = pathSegments.join('/');
+    }
+    const response = await fetch(`${FILE_API_URL}/api/files/${encodedPath}`);
     if (!response.ok) throw new Error('Failed to read file');
     return response.json();
   }, []);
 
   // ファイル更新
   const updateFile = useCallback(async (filePath: string, content: string): Promise<void> => {
-    const response = await fetch(`${FILE_API_URL}/api/files/${filePath}`, {
+    // パスのエンコード処理
+    let encodedPath = filePath;
+    if (filePath && filePath.trim() !== '') {
+      const pathSegments = filePath.split('/').map(segment => {
+        if (segment === '') return '';
+        return encodeURIComponent(segment);
+      });
+      encodedPath = pathSegments.join('/');
+    }
+    const response = await fetch(`${FILE_API_URL}/api/files/${encodedPath}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -143,7 +160,16 @@ export function useFileBrowser(initialPath: string = "") {
 
   // ファイル削除
   const deleteFile = useCallback(async (filePath: string): Promise<void> => {
-    const response = await fetch(`${FILE_API_URL}/api/files/${filePath}`, {
+    // パスのエンコード処理
+    let encodedPath = filePath;
+    if (filePath && filePath.trim() !== '') {
+      const pathSegments = filePath.split('/').map(segment => {
+        if (segment === '') return '';
+        return encodeURIComponent(segment);
+      });
+      encodedPath = pathSegments.join('/');
+    }
+    const response = await fetch(`${FILE_API_URL}/api/files/${encodedPath}`, {
       method: 'DELETE',
     });
     if (!response.ok) throw new Error('Failed to delete file');

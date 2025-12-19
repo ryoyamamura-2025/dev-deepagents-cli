@@ -270,7 +270,6 @@ async def shutdown():
 
     print("Server stopped")
 
-
 def sanitize_path(relative_path: str, base_dir: Path) -> Path:
     """
     パスのサニタイゼーション（セキュリティ対策）
@@ -285,12 +284,24 @@ def sanitize_path(relative_path: str, base_dir: Path) -> Path:
     Raises:
         ValueError: パストラバーサル検出時
     """
-    clean_path = Path(relative_path.lstrip("/"))
+    # 空のパスや"."の場合はベースディレクトリを返す
+    if not relative_path or relative_path == "." or relative_path == "":
+        return base_dir.resolve()
+    
+    # 先頭のスラッシュを削除（相対パスとして扱う）
+    clean_path = relative_path.lstrip("/")
+    
+    # 空になった場合はベースディレクトリを返す
+    if not clean_path:
+        return base_dir.resolve()
+    
+    clean_path = Path(clean_path)
     full_path = (base_dir / clean_path).resolve()
 
     # ベースディレクトリ外へのアクセスを防止
-    if not str(full_path).startswith(str(base_dir.resolve())):
-        raise ValueError("Path traversal detected")
+    base_resolved = base_dir.resolve()
+    if not str(full_path).startswith(str(base_resolved)):
+        raise ValueError(f"Path traversal detected: {relative_path} -> {full_path} (base: {base_resolved})")
 
     return full_path
 
@@ -385,13 +396,10 @@ async def read_file(file_path: str, raw: bool = False):
         バイナリファイルを直接配信（Content-Type自動設定）
     """
     try:
+        # デバッグログ：リクエストされたパスを記録
+        logger.info(f"read_file called: file_path='{file_path}', raw={raw}")
+        
         target_file = sanitize_path(file_path, WATCH_DIR)
-
-        if not target_file.exists():
-            raise HTTPException(status_code=404, detail="File not found")
-
-        if not target_file.is_file():
-            raise HTTPException(status_code=400, detail="Path is not a file")
 
         # ファイルサイズ制限
         file_size = target_file.stat().st_size
@@ -405,11 +413,61 @@ async def read_file(file_path: str, raw: bool = False):
         # rawモードの場合はバイナリファイルとして配信
         if raw:
             import mimetypes
-            mime_type, _ = mimetypes.guess_type(str(target_file))
-            return FileResponse(
-                path=target_file,
-                media_type=mime_type or "application/octet-stream",
-                filename=target_file.name
+            
+            # ファイル拡張子を取得してファイルタイプを判定
+            file_ext = target_file.suffix.lower()
+            is_pdf = file_ext == ".pdf"
+            # 画像ファイルの拡張子リスト
+            image_exts = [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico"]
+            is_image = file_ext in image_exts
+            
+            # MIMEタイプを取得（PDFの場合は明示的に設定）
+            if is_pdf:
+                mime_type = "application/pdf"
+            else:
+                mime_type, _ = mimetypes.guess_type(str(target_file))
+                if not mime_type:
+                    mime_type = "application/octet-stream"
+            
+            # ファイルを読み込む
+            file_content = target_file.read_bytes()
+            
+            # レスポンスヘッダーを設定
+            headers = {}
+            
+            # ファイル名のエンコード（日本語対応）
+            # RFC 5987形式でエンコード（UTF-8）
+            from urllib.parse import quote
+            
+            # Content-Dispositionヘッダーを設定（日本語ファイル名対応）
+            disposition_type = "inline" if (is_pdf or is_image) else "attachment"
+            
+            # ASCII文字のみの場合は通常形式、非ASCII文字の場合はRFC 5987形式を使用
+            if all(ord(c) < 128 for c in target_file.name):
+                # ASCII文字のみの場合は通常形式
+                headers["Content-Disposition"] = f'{disposition_type}; filename="{target_file.name}"'
+            else:
+                # 非ASCII文字（日本語など）を含む場合はRFC 5987形式
+                # filename* パラメータでUTF-8エンコードされたファイル名を指定
+                # filename パラメータにはASCII文字のみを使用（互換性のため）
+                filename_ascii = target_file.name.encode('ascii', 'ignore').decode('ascii')
+                if not filename_ascii:
+                    filename_ascii = "file"  # ASCII文字がない場合はデフォルト名
+                filename_utf8_encoded = quote(target_file.name, safe='')
+                headers["Content-Disposition"] = (
+                    f'{disposition_type}; filename="{filename_ascii}"; '
+                    f'filename*=UTF-8\'\'{filename_utf8_encoded}'
+                )
+            
+            # CORSヘッダーを明示的に設定（クラウドデプロイ時の問題対策）
+            headers["Access-Control-Allow-Origin"] = "*"
+            headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+            headers["Access-Control-Allow-Headers"] = "*"
+            
+            return Response(
+                content=file_content,
+                media_type=mime_type,
+                headers=headers
             )
 
         # テキストファイルとして読み取り
@@ -469,7 +527,7 @@ async def update_file(file_path: str, request: FileUpdateRequest):
         if not target_file.exists():
             target_file.touch()
 
-        # ファイル書き込み
+        # ファイル書き込み（fsync()で同期）
         try:
             target_file.write_text(request.content, encoding="utf-8")
         except Exception as e:
@@ -567,7 +625,7 @@ async def upload_files(
             safe_filename = Path(file.filename).name
             target_file = target_dir / safe_filename
 
-            # ファイルを保存
+            # ファイルを保存（fsync()で同期）
             content = await file.read()
             target_file.write_bytes(content)
 

@@ -41,7 +41,7 @@ case "$1" in
     echo ">>> Starting new container..."
     docker run -it \
       --name ${CONTAINER_NAME} \
-      -p 3232:8080 \
+      -p 8080:8080 \
       --env-file ./.env.local \
       ${IMAGE_NAME}:${TAG} \
       /bin/bash
@@ -59,7 +59,7 @@ case "$1" in
     echo ">>> Starting new container..."
     docker run -it \
       --name ${CONTAINER_NAME} \
-      -p 3232:8080 \
+      -p 8080:8080 \
       --env-file ./.env.local \
       ${IMAGE_NAME}:${TAG} \
       /bin/bash
