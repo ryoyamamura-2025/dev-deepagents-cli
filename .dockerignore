@@ -1,30 +1,30 @@
 # Git
-.git/
-.gitignore
+**/.git/
+**/.gitignore
 
 # Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-.venv/
-venv/
-ENV/
-env/
-.pytest_cache/
-.coverage
-htmlcov/
-*.egg-info/
-dist/
-build/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.Python
+**/*.so
+**/.venv/
+**/.venv/
+**/.ENV/
+**/.env/
+**/.pytest_cache/
+**/.coverage
+**/.htmlcov/
+**/*.egg-info/
+**/.dist/
+**/.build/
 
 # Node
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+**/.node_modules/
+**/.npm-debug.log*
+**/.yarn-debug.log*
+**/.yarn-error.log*
 
 # Frontend
 frontend/dist/
@@ -32,36 +32,36 @@ frontend/.next/
 frontend/out/
 
 # Environment
-.env
-.env*
-.env.local
-.env.*.local
+**/.env
+**/.env*
+**/.env.local
+**/.env.*.local
 
 # IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
+**/.vscode/
+**/.idea/
+**/*.swp
+**/*.swo
+**/*~
 
 # LangGraph
-.langgraph_api/
+backend/.langgraph_api/
 
 # Documentation
 *.md
-README*
-docs/
+**/README*
+**/docs/
 
 # Testing
-tests/
+**/.tests/
 test/
-*.test.js
-*.test.ts
-*.spec.js
-*.spec.ts
+**/*.test.js
+**/*.test.ts
+**/*.spec.js
+**/*.spec.ts
 
 # Other
-.DS_Store
-*.log
-tmp/
-temp/
+**/.DS_Store
+**/*.log
+**/tmp/
+**/temp/

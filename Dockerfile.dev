@@ -1,36 +1,43 @@
-# Dockerfile.dev - 軽量化版
 FROM python:3.13-slim
 
-# uv（高速パッケージマネージャ）を取り込み
+# 1. uvを取り込み
 COPY --from=ghcr.io/astral-sh/uv:0.8.14 /uv /uvx /bin/
 
-# 必要なパッケージを一括インストール＆クリーンアップ
-# --no-install-recommends: 推奨パッケージを除外
-# apt-get clean: aptキャッシュをクリーンアップ
-# rm -rf /var/lib/apt/lists/*: パッケージリストを削除
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    nodejs \
-    npm \
-    && npm install -g docx \
-    && npm cache clean --force \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+# 2. Node.js 22 の実行環境だけをコピー (aptを使わない技)
+# node-slimイメージからバイナリとライブラリだけを持ってくることで軽量化
+COPY --from=node:22-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:22-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
+# npmを使えるようにシンボリックリンクを貼る
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
+
+# 3. 最小限のランタイム依存（ffmpeg等）のみインストール
+# --no-install-recommends は必須
+# RUN apt-get update && apt-get install -y --no-install-recommends \
+#     ffmpeg \
+#     && apt-get clean \
+#     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# 4. Node.jsのグローバルパッケージ(docx)のインストール
+# nodeバイナリが既にあるので実行可能
+RUN npm install -g docx && npm cache clean --force
 
 WORKDIR /app
 
+# 5. Python依存関係のインストール (uvのキャッシュ活用)
 # 依存関係のみをインストール（キャッシュ活用）
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=./backend/pyproject.toml,target=pyproject.toml \
     --mount=type=bind,source=./backend/uv.lock,target=uv.lock \
     uv sync --locked --no-install-project --no-dev
 
-# ソースをコピー
-COPY ./backend/pyproject.toml ./backend/uv.lock ./
+# 6. ソースとフロントエンド成果物のコピー
 COPY ./backend ./
 
-# プロジェクト本体を同期
+# プロジェクト本体の同期
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 
-CMD ["bash", "/app/start.sh"]
+EXPOSE 8080
+
+# 起動コマンド (bashを介さず直接呼ぶとわずかに速い)
+CMD ["uv", "run", "python", "main.py"]

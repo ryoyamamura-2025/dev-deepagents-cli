@@ -1,6 +1,9 @@
 """Configuration for file API server."""
 import os
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # 環境変数でベース監視ディレクトリを指定可能
 # ユーザーごとのディレクトリは WATCH_DIR_BASE/{user_id}/ となる

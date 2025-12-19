@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { MarkdownContent } from "@/app/components/MarkdownContent";
 import type { FileItem } from "@/app/types/types";
 import useSWRMutation from "swr/mutation";
+import { FILE_API_URL } from "@/lib/config";
 
 const LANGUAGE_MAP: Record<string, string> = {
   js: "javascript",
@@ -105,8 +106,10 @@ export const FileViewDialog = React.memo<{
 
   const fileUrl = useMemo(() => {
     if (!file?.path) return "";
-    const FILE_API_URL = process.env.NEXT_PUBLIC_FILE_API_URL || 'http://localhost:8124';
-    return `${FILE_API_URL}/api/files/${file.path}?raw=true`;
+    // パスの各セグメントを個別にエンコード（/は保持）
+    const pathSegments = file.path.split('/').map(segment => encodeURIComponent(segment));
+    const encodedPath = pathSegments.join('/');
+    return `${FILE_API_URL}/api/files/${encodedPath}?raw=true`;
   }, [file?.path]);
 
   const handleCopy = useCallback(() => {
@@ -115,19 +118,34 @@ export const FileViewDialog = React.memo<{
     }
   }, [fileContent]);
 
-  const handleDownload = useCallback(() => {
-    if (fileContent && fileName) {
-      const blob = new Blob([fileContent], { type: "text/plain" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
+  const handleDownload = useCallback(async () => {
+    if (!file?.path || !fileName) return;
+    
+    try {
+      // パスの各セグメントを個別にエンコード（/は保持）
+      const pathSegments = file.path.split('/').map(segment => encodeURIComponent(segment));
+      const encodedPath = pathSegments.join('/');
+      const url = `${FILE_API_URL}/api/files/${encodedPath}?raw=true`;
+      
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error('Failed to download file');
+      }
+      
+      const blob = await response.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
       a.download = fileName;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(downloadUrl);
+    } catch (error) {
+      console.error("Failed to download file:", error);
+      toast.error('ファイルのダウンロードに失敗しました');
     }
-  }, [fileContent, fileName]);
+  }, [file?.path, fileName]);
 
   const handleEdit = useCallback(() => {
     setIsEditingMode(true);

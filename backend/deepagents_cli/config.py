@@ -180,7 +180,8 @@ class Settings:
     @property
     def has_anthropic(self) -> bool:
         """Check if Anthropic API key is configured."""
-        return self.anthropic_api_key is not None
+        return True
+        # return self.anthropic_api_key is not None
 
     @property
     def has_google(self) -> bool:
@@ -388,6 +389,16 @@ def create_model() -> BaseChatModel:
         return ChatOpenAI(
             model=model_name,
         )
+    if settings.has_google:
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        model_name = os.environ.get("GOOGLE_MODEL", "gemini-3-flash-preview")
+        console.print(f"[dim]Using Google Gemini model: {model_name}[/dim]")
+        return ChatGoogleGenerativeAI(
+            model=model_name,
+            max_tokens=None,
+        )
+    
     if settings.has_anthropic:
         from langchain_google_vertexai.model_garden import ChatAnthropicVertex
         # from langchain_anthropic import ChatAnthropic
@@ -401,16 +412,7 @@ def create_model() -> BaseChatModel:
             # causes issues in IDEs/type checkers.
             # max_tokens=20_000,  # type: ignore[arg-type]
         )
-
-    if settings.has_google:
-        from langchain_google_genai import ChatGoogleGenerativeAI
-
-        model_name = os.environ.get("GOOGLE_MODEL", "gemini-3-pro-preview")
-        console.print(f"[dim]Using Google Gemini model: {model_name}[/dim]")
-        return ChatGoogleGenerativeAI(
-            model=model_name,
-            max_tokens=None,
-        )
+    
     console.print("[bold red]Error:[/bold red] No API key configured.")
     console.print("\nPlease set one of the following environment variables:")
     console.print("  - OPENAI_API_KEY     (for OpenAI models like gpt-5-mini)")

@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils";
 import { useFileBrowser, type FileSystemItem } from "@/app/hooks/useFileBrowser";
 import { FileSystemList } from "@/app/components/FileSystemList";
 import { FileViewDialog } from "@/app/components/FileViewDialog";
+import { isPreviewableFile } from "@/app/utils/filePreview";
+import { FILE_API_URL } from "@/lib/config";
 
 interface FileBrowserProps {
   onClose?: () => void;
@@ -74,11 +76,89 @@ export function FileBrowser({ onClose }: FileBrowserProps) {
     navigateTo(item.path);
   };
 
+  const downloadFile = async (filePath: string, fileName: string) => {
+    try {
+      // パスのエンコード処理
+      // FastAPIのパスパラメータは自動的にデコードされるため、URLエンコードが必要
+      // ただし、/は保持する必要がある
+      let encodedPath = filePath;
+      if (filePath && filePath.trim() !== '') {
+        // パスの各セグメントを個別にエンコード（/は保持）
+        const pathSegments = filePath.split('/').map(segment => {
+          // 空のセグメントはそのまま返す（先頭や末尾の/を保持）
+          if (segment === '') return '';
+          return encodeURIComponent(segment);
+        });
+        encodedPath = pathSegments.join('/');
+      }
+      
+      const url = `${FILE_API_URL}/api/files/${encodedPath}?raw=true`;
+      console.log('[FileBrowser] Downloading file:', { filePath, encodedPath, url });
+      
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        // エラーレスポンスの詳細を取得
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        try {
+          const errorData = await response.text();
+          if (errorData) {
+            // JSONエラーの場合はパースを試みる
+            try {
+              const errorJson = JSON.parse(errorData);
+              errorMessage = errorJson.detail || errorJson.message || errorMessage;
+            } catch {
+              errorMessage += ` - ${errorData}`;
+            }
+          }
+        } catch (e) {
+          // エラーレスポンスの読み取りに失敗した場合は無視
+        }
+        console.error('[FileBrowser] Download failed:', {
+          status: response.status,
+          statusText: response.statusText,
+          url,
+          filePath,
+          encodedPath,
+          errorMessage
+        });
+        throw new Error(`ファイルのダウンロードに失敗しました: ${errorMessage}`);
+      }
+      
+      const blob = await response.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(downloadUrl);
+    } catch (error) {
+      console.error("[FileBrowser] Failed to download file:", error);
+      const errorMessage = error instanceof Error ? error.message : 'ファイルのダウンロードに失敗しました';
+      alert(errorMessage);
+    }
+  };
+
   const handleFileClick = async (item: FileSystemItem) => {
+    const extension = item.extension?.toLowerCase() || "";
+    
+    // プレビュー不可能なファイルの場合は確認ダイアログを表示
+    if (!isPreviewableFile(extension)) {
+      const shouldDownload = window.confirm(
+        `「${item.name}」は現在プレビューできない形式のファイルです。\n\nダウンロードしますか？`
+      );
+      
+      if (shouldDownload) {
+        await downloadFile(item.path, item.name);
+      }
+      return;
+    }
+
     setLoadingFile(true);
     try {
       // 画像やPDFなどのバイナリファイルは内容を読み込まずにプレビュー
-      const extension = item.extension?.toLowerCase() || "";
       const isBinaryFile = ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico", "pdf"].includes(extension);
 
       if (isBinaryFile) {
@@ -97,7 +177,14 @@ export function FileBrowser({ onClose }: FileBrowserProps) {
       }
     } catch (error) {
       console.error("Failed to read file:", error);
-      // TODO: Show error toast
+      // テキストファイルの読み込みに失敗した場合もダウンロードを提案
+      const shouldDownload = window.confirm(
+        `「${item.name}」の読み込みに失敗しました。\n\nダウンロードしますか？`
+      );
+      
+      if (shouldDownload) {
+        await downloadFile(item.path, item.name);
+      }
     } finally {
       setLoadingFile(false);
     }
