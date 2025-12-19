@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, Suspense } from "react";
 import { useQueryState } from "nuqs";
-import { getConfig, saveConfig, StandaloneConfig } from "@/lib/config";
+import { getConfig, saveConfig, StandaloneConfig, fetchUserId } from "@/lib/config";
 import { ConfigDialog } from "@/app/components/ConfigDialog";
 import { Button } from "@/components/ui/button";
 import { Assistant } from "@langchain/langgraph-sdk";
@@ -238,15 +238,33 @@ function HomePageContent() {
 
   // On mount, check for saved config, otherwise show config dialog
   useEffect(() => {
-    const savedConfig = getConfig();
-    if (savedConfig) {
-      setConfig(savedConfig);
-      if (!assistantId) {
-        setAssistantId(savedConfig.assistantId);
+    const loadConfig = async () => {
+      const savedConfig = getConfig();
+
+      // Fetch userId from backend
+      const userId = await fetchUserId();
+
+      if (savedConfig) {
+        // Update config with userId from backend
+        const updatedConfig = {
+          ...savedConfig,
+          userId: userId || savedConfig.userId || "default",
+        };
+
+        // Save updated config
+        saveConfig(updatedConfig);
+        setConfig(updatedConfig);
+
+        if (!assistantId) {
+          setAssistantId(savedConfig.assistantId);
+        }
+      } else {
+        // No saved config, show dialog
+        setConfigDialogOpen(true);
       }
-    } else {
-      setConfigDialogOpen(true);
-    }
+    };
+
+    loadConfig();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -295,7 +313,7 @@ function HomePageContent() {
     <ClientProvider
       deploymentUrl={config.deploymentUrl}
       apiKey={langsmithApiKey}
-      userId={config.userId}
+      userId={config.userId || "default"}
     >
       <HomePageInner
         config={config}

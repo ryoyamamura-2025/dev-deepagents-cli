@@ -237,19 +237,17 @@ async def startup():
         logger.info("agent_config is ready")
 
     # /app/workspaceの作成（デフォルトユーザー用）
-    # 注: ユーザーIDベースのworkspaceは各ユーザーのアクセス時に作成される
+    # 注: ユーザーIDベースのworkspaceは各ユーザーのアクセス時に動的に作成される
     logger.info("Downloading default workspace files...")
-    source_prefix = os.getenv("GCS_WORKSPACE_PREFIX", "/for-deepagents/workspace_yamamura")
     destination_dir = os.getenv("WORKSPACE_DEST_DIR", "/app/workspace/default")
 
-    if not cs.download_from_gcs(
-        bucket_name=bucket_name,
-        source_prefix=source_prefix,
+    if not cs.download_user_workspace_from_gcs(
+        user_id="default",
         destination_dir=destination_dir,
     ):
-        logger.warning("Could not download workspace files.")
+        logger.warning("Could not download default workspace files.")
     else:
-        logger.info("workspace files are ready")
+        logger.info("Default workspace files are ready")
 
     # ファイル監視はユーザーアクセス時に動的に作成される
     logger.info(f"Server started. File watchers will be created per user.")
@@ -337,6 +335,28 @@ async def health():
         "status": "ok",
         "service": "File Browser API",
         "watch_dir": str(WATCH_DIR)
+    }
+
+
+@app.get("/api/user/me")
+async def get_current_user(request: Request):
+    """
+    Get current user information from IAP headers.
+
+    Returns:
+        {
+            "user_id": str,
+            "email": str | null
+        }
+    """
+    from file_api.user_utils import get_email_from_iap_headers
+
+    user_id = get_user_id_from_request(request)
+    email = get_email_from_iap_headers(request)
+
+    return {
+        "user_id": user_id,
+        "email": email
     }
 
 

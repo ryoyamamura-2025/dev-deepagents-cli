@@ -6,11 +6,11 @@ This middleware implements Anthropic's "Agent Skills" pattern with progressive d
 3. Agent reads full SKILL.md content when relevant to a task
 
 Skills directory structure (per-agent + project):
-User-level: ~/.deepagents/{AGENT_NAME}/skills/
+User-level: ~/.deepagents/{USER_ID}/{AGENT_NAME}/skills/
 Project-level: {PROJECT_ROOT}/.deepagents/skills/
 
 Example structure:
-~/.deepagents/{AGENT_NAME}/skills/
+~/.deepagents/{USER_ID}/{AGENT_NAME}/skills/
 ├── web-research/
 │   ├── SKILL.md        # Required: YAML frontmatter + instructions
 │   └── helper.py       # Optional: supporting files
@@ -108,7 +108,7 @@ class SkillsMiddleware(AgentMiddleware):
     - Agent reads full SKILL.md content when a skill is relevant (progressive disclosure)
 
     Supports both user-level and project-level skills:
-    - User skills: ~/.deepagents/{AGENT_NAME}/skills/
+    - User skills: ~/.deepagents/{USER_ID}/{AGENT_NAME}/skills/
     - Project skills: {PROJECT_ROOT}/.deepagents/skills/
     - Project skills override user skills with the same name
 

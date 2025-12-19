@@ -94,6 +94,7 @@ export interface StandaloneConfig {
   deploymentUrl: string;
   assistantId: string;
   langsmithApiKey?: string;
+  userId?: string;
 }
 
 const CONFIG_KEY = "deep-agent-config";
@@ -114,4 +115,30 @@ export function getConfig(): StandaloneConfig | null {
 export function saveConfig(config: StandaloneConfig): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+}
+
+/**
+ * バックエンドからユーザーIDを取得
+ * IAP認証を通過したユーザーのメールアドレスから生成されたuser_idを取得します。
+ *
+ * @returns ユーザーID、取得できない場合はnull
+ */
+export async function fetchUserId(): Promise<string | null> {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const backendUrl = getBackendUrl();
+    const response = await fetch(`${backendUrl}/api/user/me`);
+
+    if (!response.ok) {
+      console.error("Failed to fetch user info:", response.statusText);
+      return null;
+    }
+
+    const data = await response.json();
+    return data.user_id || null;
+  } catch (error) {
+    console.error("Error fetching user ID:", error);
+    return null;
+  }
 }

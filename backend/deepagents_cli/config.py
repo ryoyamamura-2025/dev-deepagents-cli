@@ -261,6 +261,43 @@ class Settings:
         user_id = current_user_id.get()
         return Path.home() / ".deepagents" / user_id / agent_name
 
+    def _initialize_user_deepagents_dir(self, user_id: str) -> None:
+        """Initialize user .deepagents directory from default template.
+
+        Copies the default .deepagents structure from /root/.deepagents/ to
+        ~/.deepagents/{user_id}/ if the user directory doesn't exist.
+
+        Args:
+            user_id: User ID
+        """
+        import shutil
+
+        user_deepagents_base = Path.home() / ".deepagents" / user_id
+        default_deepagents = Path("/root/.deepagents")
+
+        # Only initialize if user directory doesn't exist
+        if user_deepagents_base.exists():
+            return
+
+        # Check if default template exists
+        if not default_deepagents.exists():
+            # No default template, just create empty directory
+            user_deepagents_base.mkdir(parents=True, exist_ok=True)
+            return
+
+        try:
+            # Copy default .deepagents to user directory
+            shutil.copytree(default_deepagents, user_deepagents_base)
+            from . import config as cfg
+            cfg.console.print(
+                f"[dim]Initialized user directory from default template: ~/.deepagents/{user_id}/[/dim]"
+            )
+        except Exception as e:
+            # If copy fails, create empty directory
+            import logging
+            logging.warning(f"Failed to copy default .deepagents to user directory: {e}")
+            user_deepagents_base.mkdir(parents=True, exist_ok=True)
+
     def ensure_agent_dir(self, agent_name: str) -> Path:
         """Ensure the global agent directory exists and return its path.
 
@@ -276,6 +313,11 @@ class Settings:
                 "Agent names can only contain letters, numbers, hyphens, underscores, and spaces."
             )
             raise ValueError(msg)
+
+        # Initialize user .deepagents directory from default if needed
+        user_id = current_user_id.get()
+        self._initialize_user_deepagents_dir(user_id)
+
         agent_dir = self.get_agent_dir(agent_name)
         agent_dir.mkdir(parents=True, exist_ok=True)
         return agent_dir
@@ -300,7 +342,7 @@ class Settings:
             agent_name: Name of the agent
 
         Returns:
-            Path to ~/.deepagents/{agent_name}/skills/
+            Path to ~/.deepagents/{user_id}/{agent_name}/skills/
         """
         return self.get_agent_dir(agent_name) / "skills"
 
@@ -311,7 +353,7 @@ class Settings:
             agent_name: Name of the agent
 
         Returns:
-            Path to ~/.deepagents/{agent_name}/skills/
+            Path to ~/.deepagents/{user_id}/{agent_name}/skills/
         """
         skills_dir = self.get_user_skills_dir(agent_name)
         skills_dir.mkdir(parents=True, exist_ok=True)

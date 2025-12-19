@@ -53,7 +53,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # 環境変数の設定
 ENV STATIC_DIR=/app/static-build \
     LANGGRAPH_API_URL=http://localhost:2024 \
-    WATCH_DIR=/app/workspace \
+    WATCH_DIR_BASE=/app/workspace \
     PORT=8080 \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1

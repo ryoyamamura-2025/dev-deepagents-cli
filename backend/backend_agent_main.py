@@ -137,12 +137,27 @@ def reset_agent(agent_name: str, source_agent: str | None = None) -> None:
 
 # 作業フォルダを環境変数から与えるための関数
 def _resolve_workdir() -> Path:
-    env_path = os.environ.get("WORKING_DIR")
+    """Resolve the working directory for the current user.
+
+    Returns:
+        Path to user-specific working directory (WORKING_DIR_BASE/user_id) if configured,
+        otherwise returns current working directory.
+    """
+    from deepagents_cli.config import current_user_id
+
+    env_path = os.environ.get("WORKING_DIR_BASE")
     if env_path:
-        candidate = Path(env_path).expanduser().resolve()
-        if candidate.exists():
-            return candidate
-        console.print(f"[yellow]WORKING_DIR が見つかりません: {candidate}。cwdを使用します。[/yellow]")
+        base_dir = Path(env_path).expanduser().resolve()
+
+        # Get current user ID from context
+        user_id = current_user_id.get()
+
+        # Create user-specific working directory
+        user_workdir = base_dir / user_id
+        user_workdir.mkdir(parents=True, exist_ok=True)
+
+        return user_workdir
+
     return Path.cwd()
 
 
@@ -323,7 +338,7 @@ def _format_shell_description(tool_call: ToolCall, _state: AgentState, _runtime:
     """Format shell tool call for approval prompt."""
     args = tool_call["args"]
     command = args.get("command", "N/A")
-    return f"Shell Command: {command}\nWorking Directory: {Path.cwd()}"
+    return f"Shell Command: {command}\nWorking Directory: {_resolve_workdir()}"
 
 
 def _format_execute_description(tool_call: ToolCall, _state: AgentState, _runtime: Runtime) -> str:

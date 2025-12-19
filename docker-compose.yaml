@@ -29,4 +29,4 @@ services:
       - backend/.env
     environment:
       - PYTHONUNBUFFERED=1
-      - WATCH_DIR=/app/workspace
+      - WATCH_DIR_BASE=/app/workspace
