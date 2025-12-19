@@ -9,6 +9,7 @@ import logging
 from file_api.file_watcher import FileWatcher
 from file_api.config import WATCH_DIR, WATCH_DIR_BASE, get_user_watch_dir, CORS_ORIGINS, MAX_FILE_SIZE
 from file_api.user_utils import get_user_id_from_request, get_user_id_from_websocket
+from deepagents_cli.config import current_user_id
 import httpx
 
 from fastapi.staticfiles import StaticFiles
@@ -77,6 +78,10 @@ async def _start_langgraph_dev_background() -> None:
 @app.api_route("/agent/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def proxy_to_langgraph(path: str, request: Request):
     """LangGraph APIへのプロキシ"""
+    # ユーザーIDを取得してコンテキストに設定
+    user_id = get_user_id_from_request(request)
+    current_user_id.set(user_id)
+
     if _httpx_client is None:
         raise HTTPException(
             status_code=503,
@@ -350,8 +355,9 @@ async def list_files(request: Request, path: str = ""):
         }
     """
     try:
-        # ユーザーIDを取得
+        # ユーザーIDを取得してコンテキストに設定
         user_id = get_user_id_from_request(request)
+        current_user_id.set(user_id)
         user_watch_dir = get_user_watch_dir(user_id)
 
         target_dir = sanitize_path(path, user_watch_dir)
@@ -410,8 +416,9 @@ async def read_file(request: Request, file_path: str, raw: bool = False):
         バイナリファイルを直接配信（Content-Type自動設定）
     """
     try:
-        # ユーザーIDを取得
+        # ユーザーIDを取得してコンテキストに設定
         user_id = get_user_id_from_request(request)
+        current_user_id.set(user_id)
         user_watch_dir = get_user_watch_dir(user_id)
 
         target_file = sanitize_path(file_path, user_watch_dir)
@@ -489,8 +496,9 @@ async def update_file(http_request: Request, file_path: str, request: FileUpdate
         }
     """
     try:
-        # ユーザーIDを取得
+        # ユーザーIDを取得してコンテキストに設定
         user_id = get_user_id_from_request(http_request)
+        current_user_id.set(user_id)
         user_watch_dir = get_user_watch_dir(user_id)
 
         target_file = sanitize_path(file_path, user_watch_dir)
@@ -539,8 +547,9 @@ async def delete_file(request: Request, file_path: str):
         }
     """
     try:
-        # ユーザーIDを取得
+        # ユーザーIDを取得してコンテキストに設定
         user_id = get_user_id_from_request(request)
+        current_user_id.set(user_id)
         user_watch_dir = get_user_watch_dir(user_id)
 
         target_path = sanitize_path(file_path, user_watch_dir)
@@ -590,8 +599,9 @@ async def upload_files(
         }
     """
     try:
-        # ユーザーIDを取得
+        # ユーザーIDを取得してコンテキストに設定
         user_id = get_user_id_from_request(request)
+        current_user_id.set(user_id)
         user_watch_dir = get_user_watch_dir(user_id)
 
         target_dir = sanitize_path(path, user_watch_dir)
@@ -649,8 +659,9 @@ async def websocket_endpoint(websocket: WebSocket):
     """
     await websocket.accept()
 
-    # ユーザーIDを取得
+    # ユーザーIDを取得してコンテキストに設定
     user_id = get_user_id_from_websocket(websocket)
+    current_user_id.set(user_id)
     logger.info(f"WebSocket client connected for user {user_id}")
 
     # ユーザー専用のFileWatcherを取得または作成

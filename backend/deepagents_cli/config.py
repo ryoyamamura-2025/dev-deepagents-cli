@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import uuid
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,6 +13,10 @@ from langchain_core.language_models import BaseChatModel
 from rich.console import Console
 
 dotenv.load_dotenv()
+
+# Context variable for user ID (per-request isolation in Cloud Run)
+# This allows different users to access their own data simultaneously
+current_user_id: ContextVar[str] = ContextVar('user_id', default='default')
 
 # Color scheme
 COLORS = {
@@ -198,9 +203,9 @@ class Settings:
         """Get the base user-level .deepagents directory.
 
         Returns:
-            Path to ~/.deepagents/{user_id} (user_id from USER_ID env var or 'default')
+            Path to ~/.deepagents/{user_id} (user_id from current context or 'default')
         """
-        user_id = os.getenv("USER_ID", "default")
+        user_id = current_user_id.get()
         return Path.home() / ".deepagents" / user_id
 
     def get_user_agent_md_path(self, agent_name: str) -> Path:
@@ -214,7 +219,7 @@ class Settings:
         Returns:
             Path to ~/.deepagents/{user_id}/{agent_name}/agent.md
         """
-        user_id = os.getenv("USER_ID", "default")
+        user_id = current_user_id.get()
         return Path.home() / ".deepagents" / user_id / agent_name / "agent.md"
 
     def get_project_agent_md_path(self) -> Path | None:
@@ -252,7 +257,7 @@ class Settings:
                 "Agent names can only contain letters, numbers, hyphens, underscores, and spaces."
             )
             raise ValueError(msg)
-        user_id = os.getenv("USER_ID", "default")
+        user_id = current_user_id.get()
         return Path.home() / ".deepagents" / user_id / agent_name
 
     def ensure_agent_dir(self, agent_name: str) -> Path:
