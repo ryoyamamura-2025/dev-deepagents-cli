@@ -13,12 +13,14 @@ interface ClientProviderProps {
   children: ReactNode;
   deploymentUrl: string;
   apiKey: string;
+  userId: string;
 }
 
 export function ClientProvider({
   children,
   deploymentUrl,
   apiKey,
+  userId,
 }: ClientProviderProps) {
   const client = useMemo(() => {
     return new Client({
@@ -26,9 +28,10 @@ export function ClientProvider({
       defaultHeaders: {
         "Content-Type": "application/json",
         "X-Api-Key": apiKey,
+        "X-User-Id": userId,
       },
     });
-  }, [deploymentUrl, apiKey]);
+  }, [deploymentUrl, apiKey, userId]);
 
   const value = useMemo(() => ({ client }), [client]);
 
