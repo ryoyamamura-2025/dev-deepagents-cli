@@ -715,6 +715,53 @@ async def upload_files(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
 
+
+@app.post("/api/workspace/save")
+async def save_workspace_to_gcs(request: Request):
+    """
+    Save current user's workspace to Google Cloud Storage.
+
+    This endpoint uploads all files in the user's workspace directory to GCS.
+    Files are saved to: gs://{GCS_BUCKET}/{GCS_WORKSPACE_PREFIX}/workspace_{user_id}/
+
+    Args:
+        request: FastAPI Request object
+
+    Returns:
+        {
+            "success": bool,
+            "message": str,
+            "user_id": str
+        }
+    """
+    try:
+        # Get user ID from request headers
+        user_id = get_user_id_from_request(request)
+        current_user_id.set(user_id)
+        user_watch_dir = get_user_watch_dir(user_id)
+
+        logger.info(f"Saving workspace to GCS for user {user_id}")
+
+        # Upload workspace to GCS
+        if cs.upload_user_workspace_to_gcs(user_id, str(user_watch_dir)):
+            return {
+                "success": True,
+                "message": f"Workspace saved successfully for user {user_id}",
+                "user_id": user_id
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to save workspace to Cloud Storage. Check server logs for details."
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error saving workspace to GCS: {e}")
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """
