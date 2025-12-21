@@ -129,8 +129,10 @@ def download_user_workspace_from_gcs(user_id: str, destination_dir: str) -> bool
     Download user-specific workspace from Google Cloud Storage.
 
     The function looks for workspace files in the following GCS locations (in order):
-    1. /for-deepagents/workspace_{user_id}/
-    2. /for-deepagents/workspace_default/ (fallback)
+    1. {GCS_WORKSPACE_PREFIX}/workspace_{user_id}/
+    2. {GCS_WORKSPACE_PREFIX}/workspace_default/ (fallback)
+
+    Default GCS structure: for-deepagents/workspace_{user_id}/
 
     Args:
         user_id: User ID
@@ -144,9 +146,11 @@ def download_user_workspace_from_gcs(user_id: str, destination_dir: str) -> bool
         logger.warning("GCS_BUCKET not configured, skipping workspace download")
         return False
 
+    workspace_prefix = os.getenv("GCS_WORKSPACE_PREFIX", "for-deepagents")
+
     # Try user-specific workspace first
-    user_specific_prefix = f"/{os.getenv("GCS_WORKSPACE_PREFIX")}/workspace_{user_id}"
-    logger.info(f"Attempting to download user-specific workspace from {user_specific_prefix}")
+    user_specific_prefix = f"{workspace_prefix}/workspace_{user_id}"
+    logger.info(f"Attempting to download user-specific workspace from gs://{bucket_name}/{user_specific_prefix}")
 
     if download_from_gcs(
         bucket_name=bucket_name,
@@ -157,8 +161,8 @@ def download_user_workspace_from_gcs(user_id: str, destination_dir: str) -> bool
         return True
 
     # Fallback to default workspace
-    default_prefix = "/for-deepagents/workspace_default"
-    logger.info(f"User-specific workspace not found, using default workspace from {default_prefix}")
+    default_prefix = f"{workspace_prefix}/workspace_default"
+    logger.info(f"User-specific workspace not found, using default workspace from gs://{bucket_name}/{default_prefix}")
 
     if download_from_gcs(
         bucket_name=bucket_name,
@@ -234,7 +238,8 @@ def upload_user_workspace_to_gcs(user_id: str, source_dir: str) -> bool:
     """
     Upload user-specific workspace to Google Cloud Storage.
 
-    Files are uploaded to: /for-deepagents/workspace_{user_id}/
+    Files are uploaded to: {GCS_WORKSPACE_PREFIX}/workspace_{user_id}/
+    Default GCS structure: for-deepagents/workspace_{user_id}/
 
     Args:
         user_id: User ID
@@ -251,7 +256,7 @@ def upload_user_workspace_to_gcs(user_id: str, source_dir: str) -> bool:
     workspace_prefix = os.getenv("GCS_WORKSPACE_PREFIX", "for-deepagents")
     destination_prefix = f"{workspace_prefix}/workspace_{user_id}"
 
-    logger.info(f"Uploading workspace for user {user_id} to {destination_prefix}")
+    logger.info(f"Uploading workspace for user {user_id} to gs://{bucket_name}/{destination_prefix}")
 
     if upload_to_gcs(
         bucket_name=bucket_name,

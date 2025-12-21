@@ -7,7 +7,7 @@ import { ConfigDialog } from "@/app/components/ConfigDialog";
 import { Button } from "@/components/ui/button";
 import { Assistant } from "@langchain/langgraph-sdk";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
-import { Settings, MessagesSquare, SquarePen, FolderOpen } from "lucide-react";
+import { Settings, MessagesSquare, SquarePen, FolderOpen, Save, Loader2 } from "lucide-react";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -39,6 +39,8 @@ function HomePageInner({
   const [mutateThreads, setMutateThreads] = useState<(() => void) | null>(null);
   const [interruptCount, setInterruptCount] = useState(0);
   const [assistant, setAssistant] = useState<Assistant | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
 
   const fetchAssistant = useCallback(async () => {
     const isUUID =
@@ -104,6 +106,44 @@ function HomePageInner({
     fetchAssistant();
   }, [fetchAssistant]);
 
+  const handleSaveWorkspace = async () => {
+    setIsSaving(true);
+    setSaveMessage(null);
+
+    try {
+      const response = await fetch('/api/workspace/save', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        setSaveMessage({
+          type: 'success',
+          text: 'ワークスペースを保存しました'
+        });
+        // 3秒後にメッセージを消す
+        setTimeout(() => setSaveMessage(null), 3000);
+      } else {
+        setSaveMessage({
+          type: 'error',
+          text: result.detail || '保存に失敗しました'
+        });
+      }
+    } catch (error) {
+      console.error('Failed to save workspace:', error);
+      setSaveMessage({
+        type: 'error',
+        text: 'ネットワークエラーが発生しました'
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <>
       <ConfigDialog
@@ -149,6 +189,28 @@ function HomePageInner({
               <span className="font-medium">Assistant:</span>{" "}
               {config.assistantId}
             </div>
+            {saveMessage && (
+              <div className={`text-sm px-3 py-1 rounded ${
+                saveMessage.type === 'success'
+                  ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                  : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+              }`}>
+                {saveMessage.text}
+              </div>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSaveWorkspace}
+              disabled={isSaving}
+            >
+              {isSaving ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="mr-2 h-4 w-4" />
+              )}
+              {isSaving ? '保存中...' : 'ワークスペースを保存'}
+            </Button>
             <Button
               variant="outline"
               size="sm"
